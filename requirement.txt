@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+
+qiskit
+qiskit-aer
+
+transformers
+torch
+accelerate
+safetensors
