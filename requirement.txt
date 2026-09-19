@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+qiskit
+qiskit-aer
+huggingface_hub
