@@ -29,7 +29,7 @@ def quantum_status() -> dict[str, Any]:
 
 def run_quantum(
     num_qubits: int = 20,
-    shots: int = 1,
+    shots: int = 1024,
 ) -> dict[str, Any]:
 
     if not 1 <= num_qubits <= 30:
