@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+huggingface_hub
+qiskit
+qiskit-aer
+sympy
+python-multipart
+Pillow
+reportlab
+python-docx
+openpyxl
+python-pptx
