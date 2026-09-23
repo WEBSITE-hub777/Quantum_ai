@@ -110,7 +110,7 @@ def normalize_state(
 
 def run_quantum(
     num_qubits: int = 20,
-    shots: int = 1024,
+    shots: int = 1,
 ) -> dict[str, Any]:
 
     validate_parameters(
