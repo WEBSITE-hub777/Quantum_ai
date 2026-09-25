@@ -85,9 +85,9 @@ def get_client() -> InferenceClient:
         )
 
     _client = InferenceClient(
-        provider="auto",
-        token=HF_TOKEN,
-    )
+    provider=os.getenv("QWEN_PROVIDER", "auto"),
+    token=HF_TOKEN,
+)
 
     return _client
 
