@@ -30,6 +30,13 @@ MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
+# Text-to-image model used through Hugging Face Inference Providers.
+# It can be changed from Render with IMAGE_MODEL.
+IMAGE_MODEL = os.getenv(
+    "IMAGE_MODEL",
+    "Qwen/Qwen-Image",
+).strip()
+
 _ALLOWED_IMAGE_MIMES = {
     "image/jpeg",
     "image/png",
@@ -302,38 +309,71 @@ def generate_image(prompt: str) -> dict[str, Any]:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
 
     clean_prompt = re.sub(
-        r"^(generate|create|make|draw)\s+(an?\s+)?(image|picture|photo|illustration)?\s*(of|about)?\s*",
+        r"^(generate|create|make|draw)\\s+(an?\\s+)?(image|picture|photo|illustration)?\\s*(of|about)?\\s*",
         "",
         prompt,
         flags=re.IGNORECASE,
     ).strip() or prompt
 
-    try:
-        encoded_prompt = urllib.parse.quote(clean_prompt)
-        pollinations_url = (
-            f"https://pollinations.ai/p/{encoded_prompt}"
-            "?width=1024&height=1024&model=flux&nologo=true"
-        )
-
-        req = urllib.request.Request(
-            pollinations_url,
-            headers={"User-Agent": "Quantum-Queen-AI/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=30) as response:
-            image_bytes = response.read()
-
-        encoded_base64 = base64.b64encode(image_bytes).decode("utf-8")
-        return {
-            "status": "completed",
-            "model": "Pollinations-FLUX.1-schnell",
-            "mime": "image/jpeg",
-            "data": f"data:image/jpeg;base64,{encoded_base64}",
-            "answer": "Image generated successfully.",
-        }
-    except Exception as exc:
+    if not HF_TOKENS:
         return {
             "status": "error",
             "answer": "Image generation failed.",
-            "error": type(exc).__name__,
+            "error": "HF_TOKEN environment variables are missing.",
         }
-    
+
+    # Keep the user's existing multiple-token setup and try each token so a
+    # temporary provider/rate-limit problem does not immediately break image generation.
+    tokens = list(HF_TOKENS)
+    random.shuffle(tokens)
+    errors: list[str] = []
+
+    for index, token in enumerate(tokens, start=1):
+        try:
+            client = InferenceClient(
+                provider="auto",
+                api_key=token,
+                timeout=180,
+            )
+
+            image = client.text_to_image(
+                prompt=clean_prompt,
+                model=IMAGE_MODEL,
+                width=1024,
+                height=1024,
+                num_inference_steps=4,
+            )
+
+            if image is None:
+                raise RuntimeError("Hugging Face returned no image.")
+
+            # Convert the PIL image into a browser-safe PNG data URL.
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+            image_bytes = buffer.getvalue()
+
+            if not image_bytes:
+                raise RuntimeError("Generated image is empty.")
+            if len(image_bytes) > MAX_IMAGE_BYTES:
+                raise RuntimeError("Generated image is larger than the 10 MB limit.")
+
+            encoded_base64 = base64.b64encode(image_bytes).decode("ascii")
+            return {
+                "status": "completed",
+                "model": IMAGE_MODEL,
+                "mime": "image/png",
+                "data": f"data:image/png;base64,{encoded_base64}",
+                "answer": "Image generated successfully.",
+            }
+
+        except Exception as exc:
+            errors.append(
+                f"HF image attempt {index}: {type(exc).__name__}: {str(exc)[:350]}"
+            )
+
+    return {
+        "status": "error",
+        "answer": "Image generation failed.",
+        "error": " | ".join(errors[-4:]),
+    }
+
