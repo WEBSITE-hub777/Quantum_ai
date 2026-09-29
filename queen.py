@@ -5,12 +5,22 @@ from typing import Any
 from groq import Groq
 from huggingface_hub import InferenceClient
 
+
 APP_NAME = "Quantum Queen AI"
 
 GROQ_VAR_NAMES = [
-    "GROQ_API_KEY", "GROQ1_API_KEY", "GROQ2_API_KEY", "GROQ3_API_KEY",
-    "GROQ4_API_KEY", "GROQ_API_KEYS", "Groq1", "Groq2", "Groq3", "Groq4"
+    "GROQ_API_KEY",
+    "GROQ1_API_KEY",
+    "GROQ2_API_KEY",
+    "GROQ3_API_KEY",
+    "GROQ4_API_KEY",
+    "GROQ_API_KEYS",
+    "Groq1",
+    "Groq2",
+    "Groq3",
+    "Groq4",
 ]
+
 GROQ_API_KEYS = list(dict.fromkeys([
     key.strip()
     for var in GROQ_VAR_NAMES
@@ -19,9 +29,32 @@ GROQ_API_KEYS = list(dict.fromkeys([
     if key.strip()
 ]))
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "deepseek-r1-distill-llama-70b")
-HF_TOKEN = os.getenv("HF_TOKEN")
-HF_MODEL_NAME = os.getenv("DEEPSEEK_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B")
+# Groq retired several older model IDs. Keep an explicit safety list so an
+# old Render GROQ_MODEL environment variable cannot silently break the app.
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+DEPRECATED_GROQ_MODELS = {
+    "deepseek-r1-distill-llama-70b",
+    "deepseek-r1-distill-qwen-32b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "qwen/qwen3.32b",
+    "qwen/qwen3.6-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+}
+
+_configured_groq_model = os.getenv("GROQ_MODEL", "").strip()
+GROQ_MODEL = (
+    DEFAULT_GROQ_MODEL
+    if not _configured_groq_model
+    or _configured_groq_model.lower() in DEPRECATED_GROQ_MODELS
+    else _configured_groq_model
+)
+
+HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
+HF_MODEL_NAME = os.getenv(
+    "DEEPSEEK_MODEL",
+    "deepseek-ai/DeepSeek-V4.1-Flash",
+).strip()
 
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.65"))
@@ -36,13 +69,21 @@ When quantum results are supplied in context, explain them accurately.
 """.strip()
 
 
+def _short_error(exc: Exception) -> str:
+    message = str(exc).replace("\n", " ").strip()
+    if not message:
+        message = type(exc).__name__
+    return f"{type(exc).__name__}: {message[:350]}"
+
+
 def queen_status() -> dict[str, Any]:
     return {
         "status": "ready",
         "app": APP_NAME,
         "groq_keys_loaded": len(GROQ_API_KEYS),
-        "primary_engine": "Groq Cloud API (DeepSeek R1 Distill)",
+        "primary_engine": "Groq Cloud API",
         "model": GROQ_MODEL,
+        "hf_model": HF_MODEL_NAME,
     }
 
 
@@ -51,7 +92,10 @@ def clean_history(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
         return []
 
     return [
-        {"role": item["role"], "content": item["content"].strip()[:MAX_MESSAGE_LENGTH]}
+        {
+            "role": item["role"],
+            "content": item["content"].strip()[:MAX_MESSAGE_LENGTH],
+        }
         for item in history[-MAX_HISTORY:]
         if isinstance(item, dict)
         and item.get("role") in {"user", "assistant"}
@@ -66,37 +110,58 @@ def ask_queen_groq(messages: list[dict[str, str]]) -> str:
 
     keys = list(GROQ_API_KEYS)
     random.shuffle(keys)
-    last_exception = None
+    errors: list[str] = []
 
-    for key in keys:
+    for index, key in enumerate(keys, start=1):
         try:
             client = Groq(api_key=key)
             completion = client.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=messages,
-                max_tokens=MAX_TOKENS,
+                max_completion_tokens=MAX_TOKENS,
                 temperature=TEMPERATURE,
+                include_reasoning=False,
             )
-            return completion.choices[0].message.content.strip()
-        except Exception as exc:
-            last_exception = exc
-            continue
 
-    raise RuntimeError(f"All Groq keys failed. Last error: {last_exception}")
+            if not completion.choices:
+                raise RuntimeError("Groq returned no choices.")
+
+            answer = (completion.choices[0].message.content or "").strip()
+            if not answer:
+                raise RuntimeError("Groq returned an empty response.")
+
+            return answer
+        except Exception as exc:
+            errors.append(f"Groq key {index}: {_short_error(exc)}")
+
+    raise RuntimeError(" | ".join(errors[-4:]))
 
 
 def ask_queen_hf(messages: list[dict[str, str]]) -> str:
     if not HF_TOKEN:
         raise RuntimeError("HF_TOKEN missing.")
 
-    client = InferenceClient(provider="auto", token=HF_TOKEN)
+    client = InferenceClient(
+        token=HF_TOKEN,
+        provider="auto",
+        timeout=120,
+    )
+
     completion = client.chat.completions.create(
         model=HF_MODEL_NAME,
         messages=messages,
         max_tokens=MAX_TOKENS,
         temperature=TEMPERATURE,
     )
-    return completion.choices[0].message.content.strip()
+
+    if not completion.choices:
+        raise RuntimeError("Hugging Face returned no choices.")
+
+    answer = (completion.choices[0].message.content or "").strip()
+    if not answer:
+        raise RuntimeError("Hugging Face returned an empty response.")
+
+    return answer
 
 
 def ask_queen(
@@ -115,13 +180,22 @@ def ask_queen(
     messages.extend(clean_history(history))
     messages.append({"role": "user", "content": user_message.strip()})
 
+    groq_error = None
     try:
         return ask_queen_groq(messages)
-    except Exception:
-        pass
+    except Exception as exc:
+        groq_error = _short_error(exc)
 
+    hf_error = None
     try:
         return ask_queen_hf(messages)
-    except Exception:
-        return "Quantum Queen AI is experiencing high traffic right now. Please try again in a moment."
-        
+    except Exception as exc:
+        hf_error = _short_error(exc)
+
+    # Never label every provider failure as "high traffic". Return a useful
+    # diagnostic so the real provider problem can be identified.
+    return (
+        "AI service error. "
+        f"Groq: {groq_error or 'not available'}. "
+        f"Hugging Face: {hf_error or 'not available'}."
+    )
