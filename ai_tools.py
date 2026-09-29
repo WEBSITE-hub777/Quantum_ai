@@ -19,7 +19,13 @@ HF_TOKENS = list(dict.fromkeys([
     if token.strip()
 ]))
 
-VISION_MODEL = os.getenv("VISION_MODEL", "meta-llama/Llama-3.2-11B-Vision-Instruct")
+# DeepSeek V4.1 Flash is currently available as an image-text-to-text model
+# through Hugging Face Inference Providers.
+VISION_MODEL = os.getenv(
+    "VISION_MODEL",
+    "deepseek-ai/DeepSeek-V4.1-Flash",
+).strip()
+
 MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -44,6 +50,7 @@ def get_vision_clients() -> list[InferenceClient]:
             model=VISION_MODEL,
             provider="auto",
             token=token,
+            timeout=120,
         )
         for token in tokens
     ]
@@ -199,14 +206,11 @@ def normalize_image_data(image_data: str, image_mime: str | None) -> str:
     if value.startswith("https://") or value.startswith("http://"):
         return _download_own_image_as_data_url(value, mime)
 
-    # A browser/mobile content:// URI is not readable by the Hugging Face
-    # server. It must be uploaded through /upload-image first.
     if value.startswith("content://") or value.startswith("file://"):
         raise ValueError(
             "The app sent a local content/file URI instead of the uploaded image URL."
         )
 
-    # Otherwise the API received raw base64.
     return f"data:{mime};base64,{value}"
 
 
@@ -276,13 +280,11 @@ def understand_image(
                 }
 
             except Exception as exc:
-                # Keep the real provider error for debugging, but never expose
-                # the token itself.
                 errors.append(f"HF attempt {index}: {type(exc).__name__}: {exc}")
 
         return {
             "status": "error",
-            "answer": "Image analysis failed. The vision provider rejected all configured attempts.",
+            "answer": "Image analysis failed.",
             "error": " | ".join(errors[-4:]),
         }
 
@@ -334,3 +336,4 @@ def generate_image(prompt: str) -> dict[str, Any]:
             "answer": "Image generation failed.",
             "error": type(exc).__name__,
         }
+    
