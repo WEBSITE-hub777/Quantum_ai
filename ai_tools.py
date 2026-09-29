@@ -1,4 +1,5 @@
 import base64
+import io
 import os
 import random
 import re
@@ -309,7 +310,7 @@ def generate_image(prompt: str) -> dict[str, Any]:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
 
     clean_prompt = re.sub(
-        r"^(generate|create|make|draw)\\s+(an?\\s+)?(image|picture|photo|illustration)?\\s*(of|about)?\\s*",
+        r"^(generate|create|make|draw)\s+(an?\s+)?(image|picture|photo|illustration)?\s*(of|about)?\s*",
         "",
         prompt,
         flags=re.IGNORECASE,
