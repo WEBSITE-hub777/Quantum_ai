@@ -20,8 +20,6 @@ HF_TOKENS = list(dict.fromkeys([
     if token.strip()
 ]))
 
-# DeepSeek V4.1 Flash is currently available as an image-text-to-text model
-# through Hugging Face Inference Providers.
 VISION_MODEL = os.getenv(
     "VISION_MODEL",
     "deepseek-ai/DeepSeek-V4.1-Flash",
@@ -32,10 +30,15 @@ MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 # Text-to-image model used through Hugging Face Inference Providers.
-# It can be changed from Render with IMAGE_MODEL.
 IMAGE_MODEL = os.getenv(
     "IMAGE_MODEL",
     "Qwen/Qwen-Image",
+).strip()
+
+# Image-to-image/edit model used through Hugging Face Inference Providers.
+IMAGE_EDIT_MODEL = os.getenv(
+    "IMAGE_EDIT_MODEL",
+    "Qwen/Qwen-Image-Edit",
 ).strip()
 
 _ALLOWED_IMAGE_MIMES = {
@@ -222,6 +225,31 @@ def normalize_image_data(image_data: str, image_mime: str | None) -> str:
     return f"data:{mime};base64,{value}"
 
 
+def _image_data_to_bytes(image_data: str, image_mime: str | None) -> bytes:
+    normalized = normalize_image_data(image_data, image_mime)
+
+    if normalized.startswith("data:"):
+        try:
+            _, encoded = normalized.split(",", 1)
+            image_bytes = base64.b64decode(encoded, validate=True)
+        except Exception as exc:
+            raise ValueError("Invalid image data.") from exc
+    else:
+        request = urllib.request.Request(
+            normalized,
+            headers={"User-Agent": "Quantum-Queen-AI/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            image_bytes = response.read(MAX_IMAGE_BYTES + 1)
+
+    if not image_bytes:
+        raise ValueError("Image data is empty.")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise ValueError("Image is larger than the 10 MB limit.")
+
+    return image_bytes
+
+
 def _extract_response_text(response: Any) -> str:
     if not getattr(response, "choices", None):
         raise RuntimeError("Vision model returned no choices.")
@@ -304,6 +332,23 @@ def understand_image(
         }
 
 
+def _image_to_png_data_url(image: Any) -> str:
+    if image is None:
+        raise RuntimeError("Hugging Face returned no image.")
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    image_bytes = buffer.getvalue()
+
+    if not image_bytes:
+        raise RuntimeError("Generated image is empty.")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise RuntimeError("Generated image is larger than the 10 MB limit.")
+
+    encoded_base64 = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:image/png;base64,{encoded_base64}"
+
+
 def generate_image(prompt: str) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
@@ -323,8 +368,6 @@ def generate_image(prompt: str) -> dict[str, Any]:
             "error": "HF_TOKEN environment variables are missing.",
         }
 
-    # Keep the user's existing multiple-token setup and try each token so a
-    # temporary provider/rate-limit problem does not immediately break image generation.
     tokens = list(HF_TOKENS)
     random.shuffle(tokens)
     errors: list[str] = []
@@ -342,28 +385,14 @@ def generate_image(prompt: str) -> dict[str, Any]:
                 model=IMAGE_MODEL,
                 width=1024,
                 height=1024,
-                num_inference_steps=4,
+                num_inference_steps=50,
             )
 
-            if image is None:
-                raise RuntimeError("Hugging Face returned no image.")
-
-            # Convert the PIL image into a browser-safe PNG data URL.
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG", optimize=True)
-            image_bytes = buffer.getvalue()
-
-            if not image_bytes:
-                raise RuntimeError("Generated image is empty.")
-            if len(image_bytes) > MAX_IMAGE_BYTES:
-                raise RuntimeError("Generated image is larger than the 10 MB limit.")
-
-            encoded_base64 = base64.b64encode(image_bytes).decode("ascii")
             return {
                 "status": "completed",
                 "model": IMAGE_MODEL,
                 "mime": "image/png",
-                "data": f"data:image/png;base64,{encoded_base64}",
+                "data": _image_to_png_data_url(image),
                 "answer": "Image generated successfully.",
             }
 
@@ -378,3 +407,68 @@ def generate_image(prompt: str) -> dict[str, Any]:
         "error": " | ".join(errors[-4:]),
     }
 
+
+def edit_image(
+    prompt: str,
+    image_data: str | None,
+    image_mime: str | None = None,
+) -> dict[str, Any]:
+    prompt = prompt.strip()
+    if not image_data:
+        return {"status": "error", "answer": "No image was provided for editing."}
+    if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
+        return {"status": "error", "answer": "Invalid or overly long edit prompt."}
+
+    if not HF_TOKENS:
+        return {
+            "status": "error",
+            "answer": "Image editing failed.",
+            "error": "HF_TOKEN environment variables are missing.",
+        }
+
+    try:
+        image_bytes = _image_data_to_bytes(image_data, image_mime)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "answer": "Image editing failed.",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    tokens = list(HF_TOKENS)
+    random.shuffle(tokens)
+    errors: list[str] = []
+
+    for index, token in enumerate(tokens, start=1):
+        try:
+            client = InferenceClient(
+                provider="fal-ai",
+                api_key=token,
+                timeout=180,
+            )
+
+            image = client.image_to_image(
+                image_bytes,
+                prompt=prompt,
+                model=IMAGE_EDIT_MODEL,
+                num_inference_steps=50,
+            )
+
+            return {
+                "status": "completed",
+                "model": IMAGE_EDIT_MODEL,
+                "mime": "image/png",
+                "data": _image_to_png_data_url(image),
+                "answer": "Image edited successfully.",
+            }
+
+        except Exception as exc:
+            errors.append(
+                f"HF edit attempt {index}: {type(exc).__name__}: {str(exc)[:350]}"
+            )
+
+    return {
+        "status": "error",
+        "answer": "Image editing failed.",
+        "error": " | ".join(errors[-4:]),
+    }
