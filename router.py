@@ -35,6 +35,19 @@ IMAGE_GENERATION_PATTERNS = (
     "इमेज बनाओ", "फोटो बनाओ", "चित्र बनाओ", "draw", "paint"
 )
 
+CAPABILITY_PATTERNS = (
+    "can you see images", "can you see image", "can you view images",
+    "can you view image", "can you analyze images", "can you analyze image",
+    "can you create images", "can you create image", "can you make images",
+    "can you make image", "can you generate images", "can you generate image",
+    "can you edit images", "can you edit image", "do you support images",
+    "do you support image generation", "do you support image editing",
+    "what can you do with images", "what can you do with image",
+    "क्या तुम इमेज देख", "क्या तुम फोटो देख", "क्या तुम इमेज बना",
+    "क्या तुम फोटो बना", "क्या तुम इमेज एडिट", "क्या तुम फोटो एडिट",
+    "क्या तुम इमेज कर सकते", "क्या तुम फोटो कर सकते",
+)
+
 IMAGE_EDIT_PATTERNS = (
     "edit image", "edit this image", "modify image", "modify this image",
     "change image", "change this image", "transform image", "transform this image",
@@ -90,6 +103,11 @@ def classify_request(
     message: str,
     has_image: bool = False,
 ) -> Intent:
+    # Capability questions must never accidentally trigger generation just because
+    # they contain phrases such as "can you create image?".
+    if contains_pattern(message, CAPABILITY_PATTERNS):
+        return Intent.NORMAL
+
     if has_image:
         if contains_pattern(message, IMAGE_EDIT_PATTERNS):
             return Intent.IMAGE_EDIT
@@ -151,5 +169,14 @@ def process_request(
         img_res = generate_image(message)
         return {"type": "image", "status": img_res.get("status", "completed"), "answer": img_res.get("answer", ""), "image": img_res}
 
-    answer = ask_queen(message, history=cleaned_history)
+    capability_context = (
+        "The application has integrated image capabilities. It can analyze uploaded images, "
+        "generate new images, and edit existing images using specialized tools. "
+        "Do not claim that Quantum Queen AI lacks these capabilities. "
+        "If the user is asking what the application can do, describe the application capabilities "
+        "accurately rather than pretending the chat model itself must perform every capability."
+        if contains_pattern(message, CAPABILITY_PATTERNS)
+        else None
+    )
+    answer = ask_queen(message, history=cleaned_history, system_context=capability_context)
     return {"type": "normal", "status": "completed", "answer": answer}
