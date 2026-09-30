@@ -40,8 +40,9 @@ IMAGE_EDIT_PATTERNS = (
     "change image", "change this image", "transform image", "transform this image",
     "background change", "change the background", "remove background",
     "replace background", "change color", "make it", "turn it into",
-    "इस इमेज", "इस फोटो", "फोटो बदल", "इमेज बदल", "बैकग्राउंड बदल",
-    "background बदल", "edit करो", "बदल दो", "कर दो"
+    "फोटो बदल", "इमेज बदल", "बैकग्राउंड बदल", "background बदल",
+    "edit करो", "फोटो को बदल", "इमेज को बदल", "फोटो में बदल",
+    "इमेज में बदल", "रंग बदल", "बैकग्राउंड हटा"
 )
 
 MATH_PATTERNS = (
