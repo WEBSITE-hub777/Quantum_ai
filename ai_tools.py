@@ -41,6 +41,24 @@ IMAGE_EDIT_MODEL = os.getenv(
     "Qwen/Qwen-Image-Edit",
 ).strip()
 
+# Try the dedicated image provider first, then Hugging Face's automatic
+# provider selection. This makes editing resilient when one provider is
+# temporarily slow/unavailable.
+IMAGE_EDIT_PROVIDERS = [
+    provider.strip()
+    for provider in os.getenv("IMAGE_EDIT_PROVIDERS", "fal-ai,auto").split(",")
+    if provider.strip()
+]
+
+IMAGE_EDIT_STEPS = max(
+    10,
+    min(int(os.getenv("IMAGE_EDIT_STEPS", "25")), 50),
+)
+IMAGE_EDIT_TIMEOUT = max(
+    60,
+    min(int(os.getenv("IMAGE_EDIT_TIMEOUT", "150")), 300),
+)
+
 _ALLOWED_IMAGE_MIMES = {
     "image/jpeg",
     "image/png",
@@ -439,33 +457,41 @@ def edit_image(
     random.shuffle(tokens)
     errors: list[str] = []
 
-    for index, token in enumerate(tokens, start=1):
-        try:
-            client = InferenceClient(
-                provider="fal-ai",
-                api_key=token,
-                timeout=180,
-            )
+    attempt = 0
 
-            image = client.image_to_image(
-                image_bytes,
-                prompt=prompt,
-                model=IMAGE_EDIT_MODEL,
-                num_inference_steps=50,
-            )
+    # One failed provider should not end the whole edit request. Try each
+    # configured provider with each available HF token.
+    for provider in IMAGE_EDIT_PROVIDERS:
+        for token in tokens:
+            attempt += 1
+            try:
+                client = InferenceClient(
+                    provider=provider,
+                    api_key=token,
+                    timeout=IMAGE_EDIT_TIMEOUT,
+                )
 
-            return {
-                "status": "completed",
-                "model": IMAGE_EDIT_MODEL,
-                "mime": "image/png",
-                "data": _image_to_png_data_url(image),
-                "answer": "Image edited successfully.",
-            }
+                image = client.image_to_image(
+                    image_bytes,
+                    prompt=prompt,
+                    model=IMAGE_EDIT_MODEL,
+                    num_inference_steps=IMAGE_EDIT_STEPS,
+                )
 
-        except Exception as exc:
-            errors.append(
-                f"HF edit attempt {index}: {type(exc).__name__}: {str(exc)[:350]}"
-            )
+                return {
+                    "status": "completed",
+                    "model": IMAGE_EDIT_MODEL,
+                    "provider": provider,
+                    "mime": "image/png",
+                    "data": _image_to_png_data_url(image),
+                    "answer": "Image edited successfully.",
+                }
+
+            except Exception as exc:
+                errors.append(
+                    f"HF edit attempt {attempt} ({provider}): "
+                    f"{type(exc).__name__}: {str(exc)[:350]}"
+                )
 
     return {
         "status": "error",
