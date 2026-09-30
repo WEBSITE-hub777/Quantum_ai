@@ -30,9 +30,13 @@ QUANTUM_PATTERNS = (
 
 IMAGE_GENERATION_PATTERNS = (
     "generate image", "create image", "make an image", "draw an image",
-    "draw a", "generate a picture", "create a picture", "make a picture",
-    "image bana", "photo bana", "picture bana", "banao photo",
-    "इमेज बनाओ", "फोटो बनाओ", "चित्र बनाओ", "draw", "paint"
+    "generate a picture", "create a picture", "make a picture",
+    "generate photo", "create photo", "make photo",
+    "image bana", "image banao", "photo bana", "photo banao",
+    "picture bana", "picture banao", "banao photo",
+    "इमेज बनाओ", "इमेज बना", "फोटो बनाओ", "फोटो बना",
+    "चित्र बनाओ", "चित्र बना", "तस्वीर बनाओ", "तस्वीर बना",
+    "draw", "paint"
 )
 
 CAPABILITY_PATTERNS = (
@@ -115,6 +119,22 @@ def classify_request(
 
     if contains_pattern(message, IMAGE_GENERATION_PATTERNS):
         return Intent.IMAGE_GENERATION
+
+    # Handle natural Hindi/Hinglish phrasing such as:
+    # "ye wali image banao", "is photo ko bana do", "image bana do".
+    # Capability questions were already excluded above.
+    image_words = ("image", "images", "photo", "picture", "इमेज", "फोटो", "तस्वीर", "चित्र")
+    create_words = (
+        "bana", "banao", "banado", "bana do", "बना", "बनाओ", "बना दो",
+        "create", "generate", "draw", "make", "paint"
+    )
+    normalized_message = normalize(message)
+    if (
+        any(word in normalized_message for word in image_words)
+        and any(word in normalized_message for word in create_words)
+    ):
+        return Intent.IMAGE_GENERATION
+
     if contains_pattern(message, QUANTUM_PATTERNS):
         return Intent.QUANTUM
     if contains_pattern(message, MATH_PATTERNS) or looks_like_math_structure(message):
