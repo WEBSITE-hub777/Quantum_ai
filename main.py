@@ -52,6 +52,7 @@ async def root():
             "quantum": True,
             "vision": True,
             "image_generation": True,
+            "image_editing": True,
         },
     }
 
