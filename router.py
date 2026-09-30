@@ -2,7 +2,7 @@ import re
 from enum import Enum
 from typing import Any
 
-from ai_tools import generate_image, solve_math, understand_image
+from ai_tools import edit_image, generate_image, solve_math, understand_image
 from queen import ask_queen
 from quantum import run_quantum
 
@@ -18,6 +18,7 @@ class Intent(str, Enum):
     QUANTUM = "quantum"
     VISION = "vision"
     IMAGE_GENERATION = "image_generation"
+    IMAGE_EDIT = "image_edit"
 
 
 QUANTUM_PATTERNS = (
@@ -32,6 +33,15 @@ IMAGE_GENERATION_PATTERNS = (
     "draw a", "generate a picture", "create a picture", "make a picture",
     "image bana", "photo bana", "picture bana", "banao photo",
     "इमेज बनाओ", "फोटो बनाओ", "चित्र बनाओ", "draw", "paint"
+)
+
+IMAGE_EDIT_PATTERNS = (
+    "edit image", "edit this image", "modify image", "modify this image",
+    "change image", "change this image", "transform image", "transform this image",
+    "background change", "change the background", "remove background",
+    "replace background", "change color", "make it", "turn it into",
+    "इस इमेज", "इस फोटो", "फोटो बदल", "इमेज बदल", "बैकग्राउंड बदल",
+    "background बदल", "edit करो", "बदल दो", "कर दो"
 )
 
 MATH_PATTERNS = (
@@ -75,9 +85,15 @@ def looks_like_math_structure(message: str) -> bool:
     return equation or equality or arithmetic or fraction
 
 
-def classify_request(message: str, has_image: bool = False) -> Intent:
+def classify_request(
+    message: str,
+    has_image: bool = False,
+) -> Intent:
     if has_image:
+        if contains_pattern(message, IMAGE_EDIT_PATTERNS):
+            return Intent.IMAGE_EDIT
         return Intent.VISION
+
     if contains_pattern(message, IMAGE_GENERATION_PATTERNS):
         return Intent.IMAGE_GENERATION
     if contains_pattern(message, QUANTUM_PATTERNS):
@@ -113,6 +129,19 @@ def process_request(
         answer = ask_queen(prompt, history=cleaned_history)
         return {"type": "quantum", "status": "completed", "answer": answer, "quantum": q_res}
 
+    if intent == Intent.IMAGE_EDIT:
+        img_res = edit_image(
+            prompt=message,
+            image_data=image_data,
+            image_mime=image_mime,
+        )
+        return {
+            "type": "image_edit",
+            "status": img_res.get("status", "completed"),
+            "answer": img_res.get("answer", ""),
+            "image": img_res,
+        }
+
     if intent == Intent.VISION:
         v_res = understand_image(question=message, image_data=image_data, image_mime=image_mime)
         return {"type": "vision", "status": v_res.get("status", "completed"), "answer": v_res.get("answer", ""), "vision": v_res}
@@ -123,4 +152,3 @@ def process_request(
 
     answer = ask_queen(message, history=cleaned_history)
     return {"type": "normal", "status": "completed", "answer": answer}
-    
