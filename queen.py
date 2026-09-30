@@ -81,9 +81,10 @@ def queen_status() -> dict[str, Any]:
         "status": "ready",
         "app": APP_NAME,
         "groq_keys_loaded": len(GROQ_API_KEYS),
-        "primary_engine": "Groq Cloud API",
-        "model": GROQ_MODEL,
-        "hf_model": HF_MODEL_NAME,
+        "primary_engine": "Hugging Face DeepSeek",
+        "fallback_engine": "Groq Cloud API",
+        "model": HF_MODEL_NAME,
+        "fallback_model": GROQ_MODEL,
     }
 
 
@@ -180,22 +181,22 @@ def ask_queen(
     messages.extend(clean_history(history))
     messages.append({"role": "user", "content": user_message.strip()})
 
-    groq_error = None
-    try:
-        return ask_queen_groq(messages)
-    except Exception as exc:
-        groq_error = _short_error(exc)
-
     hf_error = None
     try:
         return ask_queen_hf(messages)
     except Exception as exc:
         hf_error = _short_error(exc)
 
+    groq_error = None
+    try:
+        return ask_queen_groq(messages)
+    except Exception as exc:
+        groq_error = _short_error(exc)
+
     # Never label every provider failure as "high traffic". Return a useful
     # diagnostic so the real provider problem can be identified.
     return (
         "AI service error. "
-        f"Groq: {groq_error or 'not available'}. "
-        f"Hugging Face: {hf_error or 'not available'}."
+        f"Hugging Face: {hf_error or 'not available'}. "
+        f"Groq: {groq_error or 'not available'}."
     )
