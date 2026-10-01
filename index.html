@@ -279,17 +279,34 @@ async function send(){
 
     loading.parentElement.remove();
 
-    const answer = data.answer || "No answer returned.";
-    const bubble = addMessage("assistant", answer);
-    history.push({role: "assistant", content: answer});
+    const imageData = data?.image?.data;
+    const hasGeneratedImage = Boolean(
+      imageData &&
+      typeof imageData === "string" &&
+      (imageData.startsWith("data:image/") || imageData.startsWith("https://") || imageData.startsWith("http://"))
+    );
 
-    if(data.image?.data){
+    // Image-generation/edit responses must be rendered as images, not as
+    // plain text/URLs. Keep the normal answer only when there is no image.
+    const answer = hasGeneratedImage
+      ? ""
+      : (data.answer || "No answer returned.");
+
+    const bubble = addMessage("assistant", answer);
+    history.push({role: "assistant", content: data.answer || ""});
+
+    if(hasGeneratedImage){
       const img = document.createElement("img");
       img.className = "preview";
-      img.src = data.image.data;
-      img.alt = "AI generated image";
-      bubble.prepend(img);
-      addDownload(data.image.data, "quantum-queen-generated.png", bubble);
+      img.src = imageData;
+      img.alt = data.type === "image_edit" ? "AI edited image" : "AI generated image";
+      img.onload = () => { $("chat").scrollTop = $("chat").scrollHeight; };
+      img.onerror = () => {
+        img.remove();
+        bubble.insertAdjacentHTML("beforeend", "<br><span>Generated image could not be displayed.</span>");
+      };
+      bubble.appendChild(img);
+      addDownload(imageData, "quantum-queen-generated.png", bubble);
     }
   } catch(err) {
     if(loading) loading.parentElement.remove();
