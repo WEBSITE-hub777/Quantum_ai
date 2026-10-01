@@ -31,10 +31,10 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 # xAI Grok handles image understanding plus Imagine generation/editing.
 XAI_API_KEYS = [
-    os.getenv("GROQ1", "").strip(),
-    os.getenv("GROQ2", "").strip(),
-    os.getenv("GROQ3", "").strip(),
-    os.getenv("GROQ4", "").strip(),
+    os.getenv("Groq1", "").strip(),
+    os.getenv("Groq2", "").strip(),
+    os.getenv("Groq3", "").strip(),
+    os.getenv("Groq4", "").strip(),
 ]
 XAI_API_KEYS = [key for key in XAI_API_KEYS if key]
 GROK_VISION_MODEL = os.getenv("GROK_VISION_MODEL", "grok-4.7").strip()
@@ -310,7 +310,7 @@ def _extract_response_text(response: Any) -> str:
 
 def _xai_request(path: str, payload: dict[str, Any], timeout: int = 180) -> dict[str, Any]:
     if not XAI_API_KEYS:
-        raise RuntimeError("GROQ1/GROQ2/GROQ3/GROQ4 environment variables are missing.")
+        raise RuntimeError("Groq1/Groq2/Groq3/Groq4 environment variables are missing.")
     import json
     body = json.dumps(payload).encode("utf-8")
     errors: list[str] = []
