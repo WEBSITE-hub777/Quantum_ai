@@ -45,8 +45,17 @@ IMAGE_EDIT_MODEL = os.getenv(
 # provider selection as a fallback.
 IMAGE_EDIT_PROVIDERS = [
     provider.strip()
-    for provider in os.getenv("IMAGE_EDIT_PROVIDERS", "fal-ai,auto").split(",")
+    for provider in os.getenv("IMAGE_EDIT_PROVIDERS", "fal-ai").split(",")
     if provider.strip()
+]
+
+IMAGE_EDIT_FALLBACK_MODELS = [
+    model.strip()
+    for model in os.getenv(
+        "IMAGE_EDIT_FALLBACK_MODELS",
+        "black-forest-labs/FLUX.2-klein-9B",
+    ).split(",")
+    if model.strip() and model.strip() != IMAGE_EDIT_MODEL
 ]
 
 IMAGE_EDIT_STEPS = max(
@@ -425,12 +434,34 @@ def generate_image(prompt: str) -> dict[str, Any]:
     }
 
 
+def _prepare_edit_prompt(prompt: str) -> str:
+    text = re.sub(r"\\s+", " ", prompt.strip())
+    replacements = (
+        ("iske pichhe", "behind the subject"), ("iske peeche", "behind the subject"),
+        ("is ke pichhe", "behind the subject"), ("is ke peeche", "behind the subject"),
+        ("iske saamne", "in front of the subject"), ("iske samne", "in front of the subject"),
+        ("is ke saamne", "in front of the subject"), ("is ke samne", "in front of the subject"),
+        ("background mein", "in the background"), ("background me", "in the background"),
+        ("background mai", "in the background"), ("peeche", "behind the subject"),
+        ("pichhe", "behind the subject"), ("saamne", "in front of the subject"),
+        ("samne", "in front of the subject"), ("laga do", "add"), ("laga de", "add"),
+        ("bana do", "add"), ("bana de", "add"), ("jod do", "add"), ("jod de", "add"),
+        ("hata do", "remove"), ("hata de", "remove"), ("jungle", "forest"), ("जंगल", "forest"),
+        ("पीछे", "behind the subject"), ("सामने", "in front of the subject"),
+        ("बैकग्राउंड", "background"), ("लगा दो", "add"), ("बना दो", "add"),
+        ("जोड़ दो", "add"), ("हटा दो", "remove"),
+    )
+    for source, target in replacements:
+        text = text.replace(source, target)
+    return text
+
+
 def edit_image(
     prompt: str,
     image_data: str | None,
     image_mime: str | None = None,
 ) -> dict[str, Any]:
-    prompt = prompt.strip()
+    prompt = _prepare_edit_prompt(prompt)
     if not image_data:
         return {"status": "error", "answer": "No image was provided for editing."}
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
@@ -457,37 +488,40 @@ def edit_image(
     errors: list[str] = []
     attempt = 0
 
-    for provider in IMAGE_EDIT_PROVIDERS:
-        for token in tokens:
-            attempt += 1
-            try:
-                client = InferenceClient(
-                    provider=provider,
-                    api_key=token,
-                    timeout=IMAGE_EDIT_TIMEOUT,
-                )
+    models = [IMAGE_EDIT_MODEL, *IMAGE_EDIT_FALLBACK_MODELS]
 
-                image = client.image_to_image(
-                    image_bytes,
-                    prompt=prompt,
-                    model=IMAGE_EDIT_MODEL,
-                    num_inference_steps=IMAGE_EDIT_STEPS,
-                )
+    for model in models:
+        for provider in IMAGE_EDIT_PROVIDERS:
+            for token in tokens:
+                attempt += 1
+                try:
+                    client = InferenceClient(
+                        provider=provider,
+                        api_key=token,
+                        timeout=IMAGE_EDIT_TIMEOUT,
+                    )
 
-                return {
-                    "status": "completed",
-                    "model": IMAGE_EDIT_MODEL,
-                    "provider": provider,
-                    "mime": "image/png",
-                    "data": _image_to_png_data_url(image),
-                    "answer": "Image edited successfully.",
-                }
+                    image = client.image_to_image(
+                        image_bytes,
+                        prompt=prompt,
+                        model=model,
+                        num_inference_steps=IMAGE_EDIT_STEPS,
+                    )
 
-            except Exception as exc:
-                errors.append(
-                    f"HF edit attempt {attempt} ({provider}): "
-                    f"{type(exc).__name__}: {str(exc)[:350]}"
-                )
+                    return {
+                        "status": "completed",
+                        "model": model,
+                        "provider": provider,
+                        "mime": "image/png",
+                        "data": _image_to_png_data_url(image),
+                        "answer": "Image edited successfully.",
+                    }
+
+                except Exception as exc:
+                    errors.append(
+                        f"HF edit attempt {attempt} ({model}, {provider}): "
+                        f"{type(exc).__name__}: {str(exc)[:350]}"
+                    )
 
     return {
         "status": "error",
