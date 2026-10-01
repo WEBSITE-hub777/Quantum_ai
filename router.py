@@ -29,14 +29,42 @@ QUANTUM_PATTERNS = (
 )
 
 IMAGE_GENERATION_PATTERNS = (
+    # English
     "generate image", "create image", "make an image", "draw an image",
     "generate a picture", "create a picture", "make a picture",
-    "generate photo", "create photo", "make photo",
+    "generate photo", "create photo", "make photo", "draw", "paint",
+    # Hindi / Hinglish
     "image bana", "image banao", "photo bana", "photo banao",
     "picture bana", "picture banao", "banao photo",
     "इमेज बनाओ", "इमेज बना", "फोटो बनाओ", "फोटो बना",
     "चित्र बनाओ", "चित्र बना", "तस्वीर बनाओ", "तस्वीर बना",
-    "draw", "paint"
+    # Urdu
+    "تصویر بناؤ", "تصویر بنا دو", "تصویر بنا", "فوٹو بناؤ", "فوٹو بنا دو",
+    "ایک تصویر بناؤ", "ایک تصویر بنا دو", "تصویر تیار کرو",
+    # Marathi
+    "चित्र बनवा", "चित्र बनव", "फोटो बनवा", "फोटो बनव", "प्रतिमा बनवा",
+    "इमेज बनवा", "चित्र तयार करा", "फोटो तयार करा",
+    # Spanish
+    "crear una imagen", "crea una imagen", "haz una imagen", "hacer una imagen",
+    "genera una imagen", "generar una imagen", "crear una foto", "haz una foto",
+    # Arabic
+    "أنشئ صورة", "انشئ صورة", "اصنع صورة", "صورة أنشئ", "إنشاء صورة",
+    "اعمل صورة", "ارسم صورة",
+    # French
+    "créer une image", "crée une image", "fais une image", "faire une image",
+    "génère une image", "générer une image", "créer une photo",
+    # Bengali
+    "একটি ছবি বানাও", "ছবি বানাও", "ছবি তৈরি কর", "একটি ছবি তৈরি কর",
+    "ছবি আঁকো", "ফটো বানাও",
+    # Portuguese
+    "crie uma imagem", "criar uma imagem", "faça uma imagem", "fazer uma imagem",
+    "gere uma imagem", "gerar uma imagem", "crie uma foto", "faça uma foto",
+    # Russian
+    "создай изображение", "создать изображение", "сделай изображение",
+    "сделай картинку", "создай картинку", "создай фото", "нарисуй изображение",
+    # Indonesian
+    "buat gambar", "buat sebuah gambar", "buat foto", "hasilkan gambar",
+    "buatkan gambar", "gambar buat"
 )
 
 CAPABILITY_PATTERNS = (
@@ -204,10 +232,26 @@ def classify_request(
     # Handle natural Hindi/Hinglish phrasing such as:
     # "ye wali image banao", "is photo ko bana do", "image bana do".
     # Capability questions were already excluded above.
-    image_words = ("image", "images", "photo", "picture", "इमेज", "फोटो", "तस्वीर", "चित्र")
+    image_words = (
+        "image", "images", "photo", "picture", "इमेज", "फोटो", "तस्वीर", "चित्र",
+        "تصویر", "فوٹو", "تصوير", "صورة", "صويرة",
+        "imagen", "foto", "imagen", "image", "photo",
+        "ছবি", "ফটো", "imagem", "fotografia",
+        "изображение", "картинка", "фото",
+        "gambar", "foto", "चित्र", "प्रतिमा"
+    )
     create_words = (
         "bana", "banao", "banado", "bana do", "बना", "बनाओ", "बना दो",
-        "create", "generate", "draw", "make", "paint"
+        "create", "generate", "draw", "make", "paint",
+        "بناؤ", "بنا دو", "بنائیں", "بناؤ", "بنव", "बनवा",
+        "crear", "crea", "haz", "hacer", "genera", "generar",
+        "أنشئ", "اصنع", "إنشاء", "اعمل", "ارسم",
+        "créer", "crée", "fais", "faire", "génère", "générer",
+        "বানাও", "তৈরি কর", "আঁকো",
+        "crie", "criar", "faça", "fazer", "gere", "gerar",
+        "создай", "создать", "сделай", "нарисуй",
+        "buat", "buatkan", "hasilkan",
+        "बनवा", "बनवा", "तयार करा"
     )
     normalized_message = normalize(message)
     if (
