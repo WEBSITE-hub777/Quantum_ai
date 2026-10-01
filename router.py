@@ -52,6 +52,62 @@ CAPABILITY_PATTERNS = (
     "क्या तुम इमेज कर सकते", "क्या तुम फोटो कर सकते",
 )
 
+# Strong edit actions. These are checked only when an image is uploaded,
+# so words like "make", "create", or "change" cannot accidentally route
+# a normal text-only chat message to FLUX.
+IMAGE_EDIT_ACTION_PATTERNS = (
+    # English
+    "edit", "edited", "editing", "modify", "modified", "change", "changed",
+    "replace", "remove", "delete", "erase", "add", "insert", "put",
+    "swap", "transform", "convert", "retouch", "enhance", "improve",
+    "restore", "fix", "clean up", "recolor", "resize", "extend",
+    "expand", "uncrop", "upscale", "upgrade", "redesign",
+    "make this", "make it", "turn this into", "turn it into",
+    "create from this", "generate from this", "redraw this",
+    # Hinglish / Hindi transliterations
+    "bana do", "bana de", "banao", "banado", "badal do", "badal de",
+    "hata do", "hata de", "nikal do", "nikal de", "jod do", "jod de",
+    "laga do", "laga de", "daal do", "dal do", "add kar", "remove kar",
+    "change kar", "edit kar", "modify kar", "replace kar", "fix kar",
+    "improve kar", "enhance kar", "accha bana", "achha bana",
+    "sundar bana", "theek kar", "saaf kar", "bada kar", "chhota kar",
+    "upgrade kar", "background change", "background badal",
+    # Devanagari
+    "बना दो", "बना दे", "बनाओ", "बनादो", "बदल दो", "बदल दे",
+    "बदलो", "हटा दो", "हटा दे", "निकाल दो", "निकाल दे",
+    "जोड़ दो", "जोड़ दे", "डाल दो", "डाल दे", "लगाओ", "लगा दो",
+    "एडिट", "बदल", "हटाओ", "जोड़ो", "बढ़ाओ", "घटाओ",
+    "सुधारो", "ठीक करो", "अच्छा बना", "अच्छी बना", "सुंदर बना",
+    "सुन्दर बना", "साफ करो", "बैकग्राउंड बदल", "बैकग्राउंड हटाओ",
+)
+
+# Context phrases that strongly indicate the user is referring to the
+# uploaded image and wants a visual modification.
+IMAGE_EDIT_CONTEXT_PATTERNS = (
+    # English
+    "this image", "this photo", "this picture", "in this image",
+    "in this photo", "in this picture", "on this image", "on this photo",
+    "behind this", "behind it", "in the background", "to the background",
+    "foreground", "background", "beside this", "next to this",
+    "in front of this", "in front of it", "on top of this",
+    "remove the", "add a", "add an", "put a", "put an",
+    # Hinglish
+    "is image", "is photo", "is picture", "iss image", "iss photo",
+    "is wali image", "is wali photo", "is wale photo", "is mein",
+    "isme", "iss mein", "iske pichhe", "iske peeche", "is ke pichhe",
+    "is ke peeche", "iske saamne", "iske samne", "is ke saamne",
+    "is ke samne", "iske upar", "iske neeche", "background mein",
+    "background me", "background mai", "peeche", "pichhe", "saamne",
+    "samne", "upar", "neeche", "side mein", "side me",
+    # Devanagari
+    "इस इमेज", "इस फोटो", "इस तस्वीर", "इस चित्र", "इसमें",
+    "इस में", "इसके पीछे", "इसके पिच्छे", "इस के पीछे", "इसके सामने",
+    "इस के सामने", "इसके ऊपर", "इस के ऊपर", "इसके नीचे", "इस के नीचे",
+    "बैकग्राउंड में", "पीछे", "सामने", "ऊपर", "नीचे", "साइड में",
+)
+
+# Kept for compatibility/readability: these are the original explicit
+# edit phrases plus the broader patterns above.
 IMAGE_EDIT_PATTERNS = (
     "edit image", "edit this image", "modify image", "modify this image",
     "change image", "change this image", "transform image", "transform this image",
@@ -66,7 +122,7 @@ IMAGE_EDIT_PATTERNS = (
     "अच्छा बना", "अच्छी बना", "सुंदर बना", "सुन्दर बना",
     "बदल दो", "बना दो", "कर दो", "हटा दो", "जोड़ दो",
     "बैकग्राउंड हटाओ", "बैकग्राउंड बदलो", "रंग बदलो",
-    "फोटो एडिट", "इमेज एडिट", "तस्वीर एडिट"
+    "फोटो एडिट", "इमेज एडिट", "तस्वीर एडिट",
 )
 
 MATH_PATTERNS = (
@@ -110,6 +166,18 @@ def looks_like_math_structure(message: str) -> bool:
     return equation or equality or arithmetic or fraction
 
 
+def looks_like_image_edit(message: str) -> bool:
+    # With an uploaded image, either an explicit visual-edit action or a
+    # reference to a visual location/object is enough to send the request
+    # to the image editor. This catches natural prompts such as:
+    # "Iske pichhe ek forest bana do".
+    return (
+        contains_pattern(message, IMAGE_EDIT_ACTION_PATTERNS)
+        or contains_pattern(message, IMAGE_EDIT_CONTEXT_PATTERNS)
+        or contains_pattern(message, IMAGE_EDIT_PATTERNS)
+    )
+
+
 def classify_request(
     message: str,
     has_image: bool = False,
@@ -119,8 +187,11 @@ def classify_request(
     if contains_pattern(message, CAPABILITY_PATTERNS):
         return Intent.NORMAL
 
+    # An uploaded image changes the meaning of common generation/edit words.
+    # If the user gives an image plus an edit-style instruction, ALWAYS use the
+    # image editor instead of sending the request to the vision/text model.
     if has_image:
-        if contains_pattern(message, IMAGE_EDIT_PATTERNS):
+        if looks_like_image_edit(message):
             return Intent.IMAGE_EDIT
         return Intent.VISION
 
