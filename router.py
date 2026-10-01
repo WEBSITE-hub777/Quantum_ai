@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any
 
 from ai_tools import edit_image, generate_image, solve_math, understand_image
-from queen import ask_queen
+from queen import ask_queen, classify_multilingual_intent
 from quantum import run_quantum
 
 MAX_HISTORY = 30
@@ -193,6 +193,9 @@ def classify_request(
     if has_image:
         if looks_like_image_edit(message):
             return Intent.IMAGE_EDIT
+        semantic_intent = classify_multilingual_intent(message, has_image=True)
+        if semantic_intent == "IMAGE_EDIT":
+            return Intent.IMAGE_EDIT
         return Intent.VISION
 
     if contains_pattern(message, IMAGE_GENERATION_PATTERNS):
@@ -217,7 +220,12 @@ def classify_request(
         return Intent.QUANTUM
     if contains_pattern(message, MATH_PATTERNS) or looks_like_math_structure(message):
         return Intent.MATH
-    return Intent.NORMAL
+
+    semantic_intent = classify_multilingual_intent(message, has_image=False)
+    try:
+        return Intent(semantic_intent.lower())
+    except ValueError:
+        return Intent.NORMAL
 
 
 def process_request(
