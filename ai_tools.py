@@ -27,7 +27,13 @@ VISION_MODEL = os.getenv(
 
 MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+# xAI Grok handles image understanding plus Imagine generation/editing.
+XAI_API_KEY = os.getenv("XAI_API_KEY", "").strip()
+GROK_VISION_MODEL = os.getenv("GROK_VISION_MODEL", "grok-4.7").strip()
+GROK_IMAGE_MODEL = os.getenv("GROK_IMAGE_MODEL", "grok-imagine-image-2.0").strip()
+XAI_API_URL = "https://api.x.ai/v1"
 
 # FLUX for text -> image through Hugging Face Inference Providers.
 IMAGE_MODEL = os.getenv(
@@ -296,6 +302,73 @@ def _extract_response_text(response: Any) -> str:
     return str(content).strip()
 
 
+def _xai_request(path: str, payload: dict[str, Any], timeout: int = 180) -> dict[str, Any]:
+    if not XAI_API_KEY:
+        raise RuntimeError("XAI_API_KEY environment variable is missing.")
+    import json
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        f"{XAI_API_URL}{path}",
+        data=body,
+        headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1500]
+        raise RuntimeError(f"xAI HTTP {exc.code}: {detail}") from exc
+    return json.loads(raw.decode("utf-8"))
+
+
+def _image_data_uri_for_grok(image_data: str, image_mime: str | None) -> str:
+    normalized = normalize_image_data(image_data, image_mime)
+    if not normalized.startswith("data:image/"):
+        return normalized
+    header, encoded = normalized.split(",", 1)
+    mime = header.split(";", 1)[0].lower()
+    if mime in {"data:image/jpeg", "data:image/png"}:
+        return normalized
+    try:
+        from PIL import Image
+        raw = base64.b64decode(encoded)
+        with Image.open(io.BytesIO(raw)) as source:
+            converted = source.convert("RGB")
+            buffer = io.BytesIO()
+            converted.save(buffer, format="PNG", optimize=True)
+            png = buffer.getvalue()
+        if len(png) > MAX_IMAGE_BYTES:
+            raise ValueError("Converted image is larger than the 20 MiB limit.")
+        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    except Exception as exc:
+        raise ValueError(f"Could not prepare image for Grok: {exc}") from exc
+
+
+def _download_generated_image(url: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": "Quantum-Queen-AI/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            content_type = response.headers.get_content_type().lower()
+            data = response.read(MAX_IMAGE_BYTES + 1)
+    except Exception as exc:
+        raise RuntimeError(f"Could not download generated image: {type(exc).__name__}: {exc}") from exc
+    if len(data) > MAX_IMAGE_BYTES:
+        raise RuntimeError("Generated image is larger than the 20 MiB limit.")
+    if not data:
+        raise RuntimeError("Generated image is empty.")
+    if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        content_type = "image/jpeg"
+    return f"data:{content_type};base64," + base64.b64encode(data).decode("ascii")
+
+
+def _extract_xai_image_url(response: dict[str, Any]) -> str:
+    items = response.get("data") or []
+    if not items or not isinstance(items[0], dict) or not items[0].get("url"):
+        raise RuntimeError("xAI returned no image.")
+    return items[0]["url"]
+
+
 def understand_image(
     question: str,
     image_data: str | None,
@@ -303,59 +376,29 @@ def understand_image(
 ) -> dict[str, Any]:
     if not image_data:
         return {"status": "error", "answer": "No image was provided."}
-
     question = question.strip() or "Analyze this image carefully and explain what you can see."
-
     try:
-        image_url = normalize_image_data(image_data, image_mime)
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                    {"type": "text", "text": question},
-                ],
-            }
-        ]
-
-        clients = get_vision_clients()
-        errors: list[str] = []
-
-        for index, client in enumerate(clients, start=1):
-            try:
-                response = client.chat.completions.create(
-                    model=VISION_MODEL,
-                    messages=messages,
-                    max_tokens=2048,
-                    temperature=0.2,
-                )
-
-                answer = _extract_response_text(response)
-                if not answer:
-                    raise RuntimeError("Vision model returned an empty response.")
-
-                return {
-                    "status": "completed",
-                    "model": VISION_MODEL,
-                    "answer": answer,
-                }
-
-            except Exception as exc:
-                errors.append(f"HF attempt {index}: {type(exc).__name__}: {exc}")
-
-        return {
-            "status": "error",
-            "answer": "Image analysis failed.",
-            "error": " | ".join(errors[-4:]),
-        }
-
+        image_url = _image_data_uri_for_grok(image_data, image_mime)
+        response = _xai_request("/chat/completions", {
+            "model": GROK_VISION_MODEL,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": question},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]}],
+            "temperature": 0.2,
+        }, timeout=120)
+        choices = response.get("choices") or []
+        if not choices:
+            raise RuntimeError("Grok returned no choices.")
+        content = choices[0].get("message", {}).get("content", "")
+        if isinstance(content, list):
+            content = "\n".join(str(item.get("text", "")) for item in content if isinstance(item, dict) and item.get("text"))
+        answer = str(content).strip()
+        if not answer:
+            raise RuntimeError("Grok returned an empty response.")
+        return {"status": "completed", "model": GROK_VISION_MODEL, "answer": answer}
     except Exception as exc:
-        return {
-            "status": "error",
-            "answer": "Vision engine error.",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+        return {"status": "error", "answer": "Image analysis failed.", "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _image_to_png_data_url(image: Any) -> str:
@@ -379,59 +422,22 @@ def generate_image(prompt: str) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
-
     clean_prompt = re.sub(
         r"^(generate|create|make|draw)\s+(an?\s+)?(image|picture|photo|illustration)?\s*(of|about)?\s*",
-        "",
-        prompt,
-        flags=re.IGNORECASE,
+        "", prompt, flags=re.IGNORECASE,
     ).strip() or prompt
-
-    if not HF_TOKENS:
-        return {
-            "status": "error",
-            "answer": "Image generation failed.",
-            "error": "HF_TOKEN environment variables are missing.",
-        }
-
-    tokens = list(HF_TOKENS)
-    random.shuffle(tokens)
-    errors: list[str] = []
-
-    for index, token in enumerate(tokens, start=1):
-        try:
-            client = InferenceClient(
-                provider="auto",
-                api_key=token,
-                timeout=180,
-            )
-
-            image = client.text_to_image(
-                prompt=clean_prompt,
-                model=IMAGE_MODEL,
-                width=1024,
-                height=1024,
-                num_inference_steps=50,
-            )
-
-            return {
-                "status": "completed",
-                "model": IMAGE_MODEL,
-                "mime": "image/png",
-                "data": _image_to_png_data_url(image),
-                "answer": "Image generated successfully.",
-            }
-
-        except Exception as exc:
-            errors.append(
-                f"HF image attempt {index}: {type(exc).__name__}: {str(exc)[:350]}"
-            )
-
-    return {
-        "status": "error",
-        "answer": "Image generation failed.",
-        "error": " | ".join(errors[-4:]),
-    }
+    try:
+        response = _xai_request("/images/generations", {
+            "model": GROK_IMAGE_MODEL,
+            "prompt": clean_prompt,
+            "response_format": "url",
+        }, timeout=240)
+        data_url = _download_generated_image(_extract_xai_image_url(response))
+        return {"status": "completed", "model": GROK_IMAGE_MODEL, "mime": "image/jpeg",
+                "data": data_url, "answer": "Image generated successfully with Grok Imagine."}
+    except Exception as exc:
+        return {"status": "error", "answer": "Image generation failed.",
+                "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
@@ -456,6 +462,31 @@ def _prepare_edit_prompt(prompt: str) -> str:
     return text
 
 
+def edit_image(
+    prompt: str,
+    image_data: str | None,
+    image_mime: str | None = None,
+) -> dict[str, Any]:
+    prompt = _prepare_edit_prompt(prompt)
+    if not image_data:
+        return {"status": "error", "answer": "No image was provided for editing."}
+    if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
+        return {"status": "error", "answer": "Invalid or overly long edit prompt."}
+    try:
+        image_url = _image_data_uri_for_grok(image_data, image_mime)
+        response = _xai_request("/images/edits", {
+            "model": GROK_IMAGE_MODEL,
+            "prompt": prompt,
+            "image": {"url": image_url, "type": "image_url"},
+            "response_format": "url",
+        }, timeout=240)
+        data_url = _download_generated_image(_extract_xai_image_url(response))
+        return {"status": "completed", "model": GROK_IMAGE_MODEL, "provider": "xAI",
+                "mime": "image/jpeg", "data": data_url,
+                "answer": "Image edited successfully with Grok Imagine."}
+    except Exception as exc:
+        return {"status": "error", "answer": "Image editing failed.",
+                "error": f"{type(exc).__name__}: {exc}"}
 def edit_image(
     prompt: str,
     image_data: str | None,
