@@ -30,7 +30,13 @@ MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 # xAI Grok handles image understanding plus Imagine generation/editing.
-XAI_API_KEY = os.getenv("XAI_API_KEY", "").strip()
+XAI_API_KEYS = [
+    os.getenv("GROQ1", "").strip(),
+    os.getenv("GROQ2", "").strip(),
+    os.getenv("GROQ3", "").strip(),
+    os.getenv("GROQ4", "").strip(),
+]
+XAI_API_KEYS = [key for key in XAI_API_KEYS if key]
 GROK_VISION_MODEL = os.getenv("GROK_VISION_MODEL", "grok-4.7").strip()
 GROK_IMAGE_MODEL = os.getenv("GROK_IMAGE_MODEL", "grok-imagine-image-2.0").strip()
 XAI_API_URL = "https://api.x.ai/v1"
@@ -303,23 +309,28 @@ def _extract_response_text(response: Any) -> str:
 
 
 def _xai_request(path: str, payload: dict[str, Any], timeout: int = 180) -> dict[str, Any]:
-    if not XAI_API_KEY:
-        raise RuntimeError("XAI_API_KEY environment variable is missing.")
+    if not XAI_API_KEYS:
+        raise RuntimeError("GROQ1/GROQ2/GROQ3/GROQ4 environment variables are missing.")
     import json
     body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        f"{XAI_API_URL}{path}",
-        data=body,
-        headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1500]
-        raise RuntimeError(f"xAI HTTP {exc.code}: {detail}") from exc
-    return json.loads(raw.decode("utf-8"))
+    errors: list[str] = []
+    for api_key in XAI_API_KEYS:
+        request = urllib.request.Request(
+            f"{XAI_API_URL}{path}",
+            data=body,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+            return json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            errors.append(f"HTTP {exc.code}: {detail}")
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+    raise RuntimeError("All configured image API keys failed: " + " | ".join(errors[-4:]))
 
 
 def _image_data_uri_for_grok(image_data: str, image_mime: str | None) -> str:
