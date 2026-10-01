@@ -154,8 +154,14 @@ def process_request(
     history: list[dict[str, Any]] | None = None,
     image_data: str | None = None,
     image_mime: str | None = None,
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     message = user_message.strip()
+
+    # Some frontends upload the image first and send its public URL rather
+    # than a base64 payload. Treat that URL as the actual image input.
+    if not image_data and image_url:
+        image_data = image_url
     if not message:
         raise ValueError("Please enter a message.")
 
