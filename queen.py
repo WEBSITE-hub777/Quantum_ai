@@ -166,6 +166,66 @@ def ask_queen_hf(messages: list[dict[str, str]]) -> str:
     return answer
 
 
+
+def classify_multilingual_intent(user_message: str, has_image: bool = False) -> str:
+    """Multilingual semantic fallback using the existing remote AI model."""
+    if not isinstance(user_message, str) or not user_message.strip():
+        return "NORMAL"
+    context = ("An image is attached. Distinguish editing it from asking about it."
+               if has_image else
+               "No image is attached. IMAGE_GENERATION means creating a new image.")
+    system = """
+You are a strict multilingual intent router for Quantum Queen AI.
+Understand the user's meaning regardless of language or script.
+Output exactly ONE label: IMAGE_EDIT, IMAGE_GENERATION, VISION, MATH, QUANTUM, or NORMAL.
+IMAGE_EDIT means modifying an attached image: add, remove, change, replace, background,
+recolor, enhance, transform, redraw, etc.
+IMAGE_GENERATION means creating a NEW image from text when no image is attached.
+VISION means inspecting, describing, identifying, reading, or analyzing an attached image.
+MATH means mathematics. QUANTUM means quantum computing/science. NORMAL is everything else.
+If an image is attached and the user wants to change it, choose IMAGE_EDIT.
+If an image is attached and the user asks about its contents, choose VISION.
+Output only the label.
+""".strip()
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"{context}\nUser text: {user_message.strip()}"},
+    ]
+    labels = ("IMAGE_EDIT", "IMAGE_GENERATION", "VISION", "MATH", "QUANTUM", "NORMAL")
+    try:
+        if HF_TOKEN:
+            client = InferenceClient(token=HF_TOKEN, provider="auto", timeout=30)
+            completion = client.chat.completions.create(
+                model=HF_MODEL_NAME, messages=messages, max_tokens=8, temperature=0.0
+            )
+            answer = (completion.choices[0].message.content or "").strip().upper()
+            for label in labels:
+                if label in answer:
+                    return label
+    except Exception:
+        pass
+    try:
+        if GROQ_API_KEYS:
+            keys = list(GROQ_API_KEYS)
+            random.shuffle(keys)
+            for key in keys:
+                try:
+                    client = Groq(api_key=key)
+                    completion = client.chat.completions.create(
+                        model=GROQ_MODEL, messages=messages, max_completion_tokens=8,
+                        temperature=0.0, include_reasoning=False
+                    )
+                    answer = (completion.choices[0].message.content or "").strip().upper()
+                    for label in labels:
+                        if label in answer:
+                            return label
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return "VISION" if has_image else "NORMAL"
+
+
 def ask_queen(
     user_message: str,
     history: list[dict[str, Any]] | None = None,
