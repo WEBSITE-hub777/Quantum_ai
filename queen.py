@@ -72,7 +72,7 @@ Developer identity:
 - If the user asks who owns, developed, created, made, or built Quantum Queen AI, or asks for the developer or owner's name, answer: "मेरे डेवलपर का नाम मृ्त्युंजय दूबे है।"
 - If asked in English, answer naturally in English while preserving the same name.
 - Do not invent additional personal details about the developer.
-""".strip())
+""".strip()
 
 
 def _short_error(exc: Exception) -> str:
