@@ -29,21 +29,20 @@ MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
-# Text-to-image model used through Hugging Face Inference Providers.
+# FLUX for text -> image through Hugging Face Inference Providers.
 IMAGE_MODEL = os.getenv(
     "IMAGE_MODEL",
-    "Qwen/Qwen-Image",
+    "black-forest-labs/FLUX.1-dev",
 ).strip()
 
-# Image-to-image/edit model used through Hugging Face Inference Providers.
+# FLUX Kontext for image + prompt -> edited image.
 IMAGE_EDIT_MODEL = os.getenv(
     "IMAGE_EDIT_MODEL",
-    "Qwen/Qwen-Image-Edit",
+    "black-forest-labs/FLUX.1-Kontext-dev",
 ).strip()
 
-# Try the dedicated image provider first, then Hugging Face's automatic
-# provider selection. This makes editing resilient when one provider is
-# temporarily slow/unavailable.
+# Try the dedicated image provider first, then Hugging Face automatic
+# provider selection as a fallback.
 IMAGE_EDIT_PROVIDERS = [
     provider.strip()
     for provider in os.getenv("IMAGE_EDIT_PROVIDERS", "fal-ai,auto").split(",")
@@ -456,11 +455,8 @@ def edit_image(
     tokens = list(HF_TOKENS)
     random.shuffle(tokens)
     errors: list[str] = []
-
     attempt = 0
 
-    # One failed provider should not end the whole edit request. Try each
-    # configured provider with each available HF token.
     for provider in IMAGE_EDIT_PROVIDERS:
         for token in tokens:
             attempt += 1
