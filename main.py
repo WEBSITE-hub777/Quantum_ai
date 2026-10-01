@@ -15,7 +15,7 @@ from router import process_request
 APP_NAME = "Quantum Queen AI"
 APP_VERSION = "4.0.0"
 MAX_MESSAGE_LENGTH = 20000
-MAX_IMAGE_SIZE = 10 * 1024 * 1024
+MAX_IMAGE_SIZE = 20 * 1024 * 1024
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
