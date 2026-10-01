@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     image_data: str | None = None
     image_mime: str | None = None
+    image_url: str | None = None
 
 
 class QuantumRequest(BaseModel):
@@ -75,6 +76,7 @@ async def chat(request: ChatRequest):
             history=request.history,
             image_data=request.image_data,
             image_mime=request.image_mime,
+            image_url=request.image_url,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
