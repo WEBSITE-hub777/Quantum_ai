@@ -362,6 +362,16 @@ def _download_generated_image(url: str) -> str:
     return f"data:{content_type};base64," + base64.b64encode(data).decode("ascii")
 
 
+def _extract_xai_b64(response: dict[str, Any]) -> str:
+    items = response.get("data") or []
+    if not items or not isinstance(items[0], dict):
+        raise RuntimeError("xAI returned no image.")
+    encoded = items[0].get("b64_json")
+    if not encoded:
+        raise RuntimeError("xAI returned no base64 image.")
+    return "data:image/jpeg;base64," + encoded
+
+
 def _extract_xai_image_url(response: dict[str, Any]) -> str:
     items = response.get("data") or []
     if not items or not isinstance(items[0], dict) or not items[0].get("url"):
@@ -430,9 +440,9 @@ def generate_image(prompt: str) -> dict[str, Any]:
         response = _xai_request("/images/generations", {
             "model": GROK_IMAGE_MODEL,
             "prompt": clean_prompt,
-            "response_format": "url",
+            "response_format": "b64_json",
         }, timeout=240)
-        data_url = _download_generated_image(_extract_xai_image_url(response))
+        data_url = _extract_xai_b64(response)
         return {"status": "completed", "model": GROK_IMAGE_MODEL, "mime": "image/jpeg",
                 "data": data_url, "answer": "Image generated successfully with Grok Imagine."}
     except Exception as exc:
