@@ -437,17 +437,39 @@ def generate_image(prompt: str) -> dict[str, Any]:
         "", prompt, flags=re.IGNORECASE,
     ).strip() or prompt
     try:
+        # Let xAI return its default temporary URL, then download it on
+        # the backend and convert it to a data URL for the frontend. This
+        # avoids depending on b64_json support/format differences.
         response = _xai_request("/images/generations", {
             "model": GROK_IMAGE_MODEL,
             "prompt": clean_prompt,
-            "response_format": "b64_json",
         }, timeout=240)
-        data_url = _extract_xai_b64(response)
-        return {"status": "completed", "model": GROK_IMAGE_MODEL, "mime": "image/jpeg",
-                "data": data_url, "answer": "Image generated successfully with Grok Imagine."}
+
+        items = response.get("data") or []
+        if not items or not isinstance(items[0], dict):
+            raise RuntimeError(f"xAI returned no image data: {str(response)[:1200]}")
+
+        item = items[0]
+        if item.get("url"):
+            data_url = _download_generated_image(item["url"])
+        elif item.get("b64_json"):
+            data_url = _extract_xai_b64(response)
+        else:
+            raise RuntimeError(f"xAI image response contained neither url nor b64_json: {str(response)[:1200]}")
+
+        return {
+            "status": "completed",
+            "model": GROK_IMAGE_MODEL,
+            "mime": "image/jpeg",
+            "data": data_url,
+            "answer": "Image generated successfully with Grok Imagine.",
+        }
     except Exception as exc:
-        return {"status": "error", "answer": "Image generation failed.",
-                "error": f"{type(exc).__name__}: {exc}"}
+        return {
+            "status": "error",
+            "answer": "Image generation failed.",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
