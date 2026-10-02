@@ -29,56 +29,6 @@ MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
-# xAI Grok handles image understanding plus Imagine generation/editing.
-XAI_API_KEYS = [
-    os.getenv("Groq1", "").strip(),
-    os.getenv("Groq2", "").strip(),
-    os.getenv("Groq3", "").strip(),
-    os.getenv("Groq4", "").strip(),
-]
-XAI_API_KEYS = [key for key in XAI_API_KEYS if key]
-GROK_VISION_MODEL = os.getenv("GROK_VISION_MODEL", "grok-4.7").strip()
-GROK_IMAGE_MODEL = os.getenv("GROK_IMAGE_MODEL", "grok-imagine-image-2.0").strip()
-XAI_API_URL = "https://api.x.ai/v1"
-
-# FLUX for text -> image through Hugging Face Inference Providers.
-IMAGE_MODEL = os.getenv(
-    "IMAGE_MODEL",
-    "black-forest-labs/FLUX.1-dev",
-).strip()
-
-# FLUX Kontext for image + prompt -> edited image.
-IMAGE_EDIT_MODEL = os.getenv(
-    "IMAGE_EDIT_MODEL",
-    "black-forest-labs/FLUX.1-Kontext-dev",
-).strip()
-
-# Try the dedicated image provider first, then Hugging Face automatic
-# provider selection as a fallback.
-IMAGE_EDIT_PROVIDERS = [
-    provider.strip()
-    for provider in os.getenv("IMAGE_EDIT_PROVIDERS", "fal-ai").split(",")
-    if provider.strip()
-]
-
-IMAGE_EDIT_FALLBACK_MODELS = [
-    model.strip()
-    for model in os.getenv(
-        "IMAGE_EDIT_FALLBACK_MODELS",
-        "black-forest-labs/FLUX.2-klein-9B",
-    ).split(",")
-    if model.strip() and model.strip() != IMAGE_EDIT_MODEL
-]
-
-IMAGE_EDIT_STEPS = max(
-    10,
-    min(int(os.getenv("IMAGE_EDIT_STEPS", "25")), 50),
-)
-IMAGE_EDIT_TIMEOUT = max(
-    60,
-    min(int(os.getenv("IMAGE_EDIT_TIMEOUT", "150")), 300),
-)
-
 _ALLOWED_IMAGE_MIMES = {
     "image/jpeg",
     "image/png",
@@ -308,86 +258,118 @@ def _extract_response_text(response: Any) -> str:
     return str(content).strip()
 
 
-def _xai_request(path: str, payload: dict[str, Any], timeout: int = 180) -> dict[str, Any]:
-    if not XAI_API_KEYS:
-        raise RuntimeError("Groq1/Groq2/Groq3/Groq4 environment variables are missing.")
+# ---------------------------------------------------------------------------
+# Pollinations image stack
+# ---------------------------------------------------------------------------
+POLLINATIONS_API_KEY = os.getenv("Quantum1", "").strip()
+POLLINATIONS_BASE_URL = "https://gen.pollinations.ai"
+POLLINATIONS_VISION_MODEL = os.getenv(
+    "POLLINATIONS_VISION_MODEL",
+    "deepseek/deepseek-v4-flash-vision-exp",
+).strip()
+POLLINATIONS_IMAGE_MODEL = os.getenv(
+    "POLLINATIONS_IMAGE_MODEL",
+    "black-forest-labs/flux.1-kontext-pro",
+).strip()
+POLLINATIONS_IMAGE_EDIT_MODEL = os.getenv(
+    "POLLINATIONS_IMAGE_EDIT_MODEL",
+    "black-forest-labs/flux.1-kontext-pro",
+).strip()
+
+
+def _pollinations_headers() -> dict[str, str]:
+    if not POLLINATIONS_API_KEY:
+        raise RuntimeError("Quantum1 environment variable is missing.")
+    return {
+        "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _pollinations_json_post(
+    path: str,
+    payload: dict[str, Any],
+    timeout: int = 180,
+) -> dict[str, Any]:
     import json
+    import urllib.error
+
     body = json.dumps(payload).encode("utf-8")
-    errors: list[str] = []
-    for api_key in XAI_API_KEYS:
-        request = urllib.request.Request(
-            f"{XAI_API_URL}{path}",
-            data=body,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read()
-            return json.loads(raw.decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:1000]
-            errors.append(f"HTTP {exc.code}: {detail}")
-        except Exception as exc:
-            errors.append(f"{type(exc).__name__}: {exc}")
-    raise RuntimeError("All configured image API keys failed: " + " | ".join(errors[-4:]))
+    request = urllib.request.Request(
+        f"{POLLINATIONS_BASE_URL}{path}",
+        data=body,
+        headers=_pollinations_headers(),
+        method="POST",
+    )
 
-
-def _image_data_uri_for_grok(image_data: str, image_mime: str | None) -> str:
-    normalized = normalize_image_data(image_data, image_mime)
-    if not normalized.startswith("data:image/"):
-        return normalized
-    header, encoded = normalized.split(",", 1)
-    mime = header.split(";", 1)[0].lower()
-    if mime in {"data:image/jpeg", "data:image/png"}:
-        return normalized
     try:
-        from PIL import Image
-        raw = base64.b64decode(encoded)
-        with Image.open(io.BytesIO(raw)) as source:
-            converted = source.convert("RGB")
-            buffer = io.BytesIO()
-            converted.save(buffer, format="PNG", optimize=True)
-            png = buffer.getvalue()
-        if len(png) > MAX_IMAGE_BYTES:
-            raise ValueError("Converted image is larger than the 20 MiB limit.")
-        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1500]
+        raise RuntimeError(f"Pollinations HTTP {exc.code}: {detail}") from exc
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
     except Exception as exc:
-        raise ValueError(f"Could not prepare image for Grok: {exc}") from exc
+        raise RuntimeError("Pollinations returned invalid JSON.") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("Pollinations returned an invalid response.")
+    return payload
+
+
+def _extract_pollinations_image(response: dict[str, Any]) -> str:
+    items = response.get("data") or []
+    if not items or not isinstance(items[0], dict):
+        raise RuntimeError(f"Pollinations returned no image: {str(response)[:1200]}")
+
+    item = items[0]
+    if item.get("b64_json"):
+        return "data:image/png;base64," + str(item["b64_json"])
+
+    if item.get("url"):
+        return _download_generated_image(str(item["url"]))
+
+    raise RuntimeError(
+        f"Pollinations image response contained neither b64_json nor url: "
+        f"{str(response)[:1200]}"
+    )
 
 
 def _download_generated_image(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": "Quantum-Queen-AI/1.0"})
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Quantum-Queen-AI/1.0"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             content_type = response.headers.get_content_type().lower()
             data = response.read(MAX_IMAGE_BYTES + 1)
     except Exception as exc:
-        raise RuntimeError(f"Could not download generated image: {type(exc).__name__}: {exc}") from exc
+        raise RuntimeError(
+            f"Could not download generated image: {type(exc).__name__}: {exc}"
+        ) from exc
+
     if len(data) > MAX_IMAGE_BYTES:
         raise RuntimeError("Generated image is larger than the 20 MiB limit.")
     if not data:
         raise RuntimeError("Generated image is empty.")
+
     if content_type not in {"image/jpeg", "image/png", "image/webp"}:
-        content_type = "image/jpeg"
-    return f"data:{content_type};base64," + base64.b64encode(data).decode("ascii")
+        content_type = "image/png"
+
+    return (
+        f"data:{content_type};base64,"
+        + base64.b64encode(data).decode("ascii")
+    )
 
 
-def _extract_xai_b64(response: dict[str, Any]) -> str:
-    items = response.get("data") or []
-    if not items or not isinstance(items[0], dict):
-        raise RuntimeError("xAI returned no image.")
-    encoded = items[0].get("b64_json")
-    if not encoded:
-        raise RuntimeError("xAI returned no base64 image.")
-    return "data:image/jpeg;base64," + encoded
-
-
-def _extract_xai_image_url(response: dict[str, Any]) -> str:
-    items = response.get("data") or []
-    if not items or not isinstance(items[0], dict) or not items[0].get("url"):
-        raise RuntimeError("xAI returned no image.")
-    return items[0]["url"]
+def _prepare_pollinations_image(image_data: str, image_mime: str | None) -> str:
+    normalized = normalize_image_data(image_data, image_mime)
+    if normalized.startswith("data:image/"):
+        return normalized
+    return normalized
 
 
 def understand_image(
@@ -397,83 +379,100 @@ def understand_image(
 ) -> dict[str, Any]:
     if not image_data:
         return {"status": "error", "answer": "No image was provided."}
-    question = question.strip() or "Analyze this image carefully and explain what you can see."
+
+    question = (
+        question.strip()
+        or "Analyze this image carefully and explain what you can see."
+    )
+
     try:
-        image_url = _image_data_uri_for_grok(image_data, image_mime)
-        response = _xai_request("/chat/completions", {
-            "model": GROK_VISION_MODEL,
-            "messages": [{"role": "user", "content": [
-                {"type": "text", "text": question},
-                {"type": "image_url", "image_url": {"url": image_url}},
-            ]}],
-            "temperature": 0.2,
-        }, timeout=120)
+        image_url = _prepare_pollinations_image(image_data, image_mime)
+
+        response = _pollinations_json_post(
+            "/v1/chat/completions",
+            {
+                "model": POLLINATIONS_VISION_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_url},
+                            },
+                        ],
+                    }
+                ],
+                "temperature": 0.2,
+                "max_tokens": 4096,
+            },
+            timeout=180,
+        )
+
         choices = response.get("choices") or []
         if not choices:
-            raise RuntimeError("Grok returned no choices.")
+            raise RuntimeError("Pollinations vision returned no choices.")
+
         content = choices[0].get("message", {}).get("content", "")
         if isinstance(content, list):
-            content = "\n".join(str(item.get("text", "")) for item in content if isinstance(item, dict) and item.get("text"))
+            content = "\n".join(
+                str(item.get("text", ""))
+                for item in content
+                if isinstance(item, dict) and item.get("text")
+            )
+
         answer = str(content).strip()
         if not answer:
-            raise RuntimeError("Grok returned an empty response.")
-        return {"status": "completed", "model": GROK_VISION_MODEL, "answer": answer}
+            raise RuntimeError("Pollinations vision returned an empty response.")
+
+        return {
+            "status": "completed",
+            "model": POLLINATIONS_VISION_MODEL,
+            "provider": "Pollinations",
+            "answer": answer,
+        }
     except Exception as exc:
-        return {"status": "error", "answer": "Image analysis failed.", "error": f"{type(exc).__name__}: {exc}"}
-
-
-def _image_to_png_data_url(image: Any) -> str:
-    if image is None:
-        raise RuntimeError("Hugging Face returned no image.")
-
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG", optimize=True)
-    image_bytes = buffer.getvalue()
-
-    if not image_bytes:
-        raise RuntimeError("Generated image is empty.")
-    if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise RuntimeError("Generated image is larger than the 10 MB limit.")
-
-    encoded_base64 = base64.b64encode(image_bytes).decode("ascii")
-    return f"data:image/png;base64,{encoded_base64}"
+        return {
+            "status": "error",
+            "answer": "Image analysis failed.",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
+
     clean_prompt = re.sub(
-        r"^(generate|create|make|draw)\s+(an?\s+)?(image|picture|photo|illustration)?\s*(of|about)?\s*",
-        "", prompt, flags=re.IGNORECASE,
+        r"^(generate|create|make|draw)\s+(an?\s+)?"
+        r"(image|picture|photo|illustration)?\s*(of|about)?\s*",
+        "",
+        prompt,
+        flags=re.IGNORECASE,
     ).strip() or prompt
+
     try:
-        # Let xAI return its default temporary URL, then download it on
-        # the backend and convert it to a data URL for the frontend. This
-        # avoids depending on b64_json support/format differences.
-        response = _xai_request("/images/generations", {
-            "model": GROK_IMAGE_MODEL,
-            "prompt": clean_prompt,
-        }, timeout=240)
+        response = _pollinations_json_post(
+            "/v1/images/generations",
+            {
+                "model": POLLINATIONS_IMAGE_MODEL,
+                "prompt": clean_prompt,
+                "response_format": "b64_json",
+            },
+            timeout=300,
+        )
 
-        items = response.get("data") or []
-        if not items or not isinstance(items[0], dict):
-            raise RuntimeError(f"xAI returned no image data: {str(response)[:1200]}")
-
-        item = items[0]
-        if item.get("url"):
-            data_url = _download_generated_image(item["url"])
-        elif item.get("b64_json"):
-            data_url = _extract_xai_b64(response)
-        else:
-            raise RuntimeError(f"xAI image response contained neither url nor b64_json: {str(response)[:1200]}")
+        data_url = _extract_pollinations_image(response)
 
         return {
             "status": "completed",
-            "model": GROK_IMAGE_MODEL,
-            "mime": "image/jpeg",
+            "model": POLLINATIONS_IMAGE_MODEL,
+            "provider": "Pollinations",
+            "mime": data_url.split(";", 1)[0].replace("data:", ""),
             "data": data_url,
-            "answer": "Image generated successfully with Grok Imagine.",
+            "answer": "Image generated successfully with Pollinations.",
         }
     except Exception as exc:
         return {
@@ -484,121 +483,171 @@ def generate_image(prompt: str) -> dict[str, Any]:
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
-    text = re.sub(r"\\s+", " ", prompt.strip())
+    text = re.sub(r"\s+", " ", prompt.strip())
     replacements = (
-        ("iske pichhe", "behind the subject"), ("iske peeche", "behind the subject"),
-        ("is ke pichhe", "behind the subject"), ("is ke peeche", "behind the subject"),
-        ("iske saamne", "in front of the subject"), ("iske samne", "in front of the subject"),
-        ("is ke saamne", "in front of the subject"), ("is ke samne", "in front of the subject"),
-        ("background mein", "in the background"), ("background me", "in the background"),
-        ("background mai", "in the background"), ("peeche", "behind the subject"),
-        ("pichhe", "behind the subject"), ("saamne", "in front of the subject"),
-        ("samne", "in front of the subject"), ("laga do", "add"), ("laga de", "add"),
-        ("bana do", "add"), ("bana de", "add"), ("jod do", "add"), ("jod de", "add"),
-        ("hata do", "remove"), ("hata de", "remove"), ("jungle", "forest"), ("जंगल", "forest"),
-        ("पीछे", "behind the subject"), ("सामने", "in front of the subject"),
-        ("बैकग्राउंड", "background"), ("लगा दो", "add"), ("बना दो", "add"),
-        ("जोड़ दो", "add"), ("हटा दो", "remove"),
+        ("iske pichhe", "behind the subject"),
+        ("iske peeche", "behind the subject"),
+        ("is ke pichhe", "behind the subject"),
+        ("is ke peeche", "behind the subject"),
+        ("iske saamne", "in front of the subject"),
+        ("iske samne", "in front of the subject"),
+        ("is ke saamne", "in front of the subject"),
+        ("is ke samne", "in front of the subject"),
+        ("background mein", "in the background"),
+        ("background me", "in the background"),
+        ("background mai", "in the background"),
+        ("peeche", "behind the subject"),
+        ("pichhe", "behind the subject"),
+        ("saamne", "in front of the subject"),
+        ("samne", "in front of the subject"),
+        ("laga do", "add"),
+        ("laga de", "add"),
+        ("bana do", "add"),
+        ("bana de", "add"),
+        ("jod do", "add"),
+        ("jod de", "add"),
+        ("hata do", "remove"),
+        ("hata de", "remove"),
+        ("jungle", "forest"),
+        ("जंगल", "forest"),
+        ("पीछे", "behind the subject"),
+        ("सामने", "in front of the subject"),
+        ("बैकग्राउंड", "background"),
+        ("लगा दो", "add"),
+        ("बना दो", "add"),
+        ("जोड़ दो", "add"),
+        ("हटा दो", "remove"),
     )
     for source, target in replacements:
         text = text.replace(source, target)
     return text
 
 
-def edit_image(
+def _multipart_edit_request(
+    image_bytes: bytes,
+    image_mime: str,
     prompt: str,
-    image_data: str | None,
-    image_mime: str | None = None,
+    model: str,
+    timeout: int = 300,
 ) -> dict[str, Any]:
-    prompt = _prepare_edit_prompt(prompt)
-    if not image_data:
-        return {"status": "error", "answer": "No image was provided for editing."}
-    if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
-        return {"status": "error", "answer": "Invalid or overly long edit prompt."}
-    try:
-        image_url = _image_data_uri_for_grok(image_data, image_mime)
-        response = _xai_request("/images/edits", {
-            "model": GROK_IMAGE_MODEL,
-            "prompt": prompt,
-            "image": {"url": image_url, "type": "image_url"},
-            "response_format": "url",
-        }, timeout=240)
-        data_url = _download_generated_image(_extract_xai_image_url(response))
-        return {"status": "completed", "model": GROK_IMAGE_MODEL, "provider": "xAI",
-                "mime": "image/jpeg", "data": data_url,
-                "answer": "Image edited successfully with Grok Imagine."}
-    except Exception as exc:
-        return {"status": "error", "answer": "Image editing failed.",
-                "error": f"{type(exc).__name__}: {exc}"}
-def edit_image(
-    prompt: str,
-    image_data: str | None,
-    image_mime: str | None = None,
-) -> dict[str, Any]:
-    prompt = _prepare_edit_prompt(prompt)
-    if not image_data:
-        return {"status": "error", "answer": "No image was provided for editing."}
-    if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
-        return {"status": "error", "answer": "Invalid or overly long edit prompt."}
+    """Call the OpenAI-compatible Pollinations image-edit endpoint."""
+    import json
+    import urllib.error
+    import uuid
 
-    if not HF_TOKENS:
+    boundary = "----QuantumQueenBoundary" + uuid.uuid4().hex
+    chunks: list[bytes] = []
+
+    def add_field(name: str, value: str) -> None:
+        chunks.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        )
+
+    extension = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif",
+    }.get(image_mime, "png")
+
+    add_field("model", model)
+    add_field("prompt", prompt)
+    add_field("response_format", "b64_json")
+
+    chunks.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="image"; filename="input.{extension}"\r\n'
+            f"Content-Type: {image_mime}\r\n\r\n"
+        ).encode("utf-8")
+    )
+    chunks.append(image_bytes)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+
+    request = urllib.request.Request(
+        f"{POLLINATIONS_BASE_URL}/v1/images/edits",
+        data=b"".join(chunks),
+        headers={
+            "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1500]
+        raise RuntimeError(
+            f"Pollinations edit HTTP {exc.code}: {detail}"
+        ) from exc
+
+    try:
+        result = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError("Pollinations edit returned invalid JSON.") from exc
+
+    if not isinstance(result, dict):
+        raise RuntimeError("Pollinations edit returned an invalid response.")
+    return result
+
+
+def edit_image(
+    prompt: str,
+    image_data: str | None,
+    image_mime: str | None = None,
+) -> dict[str, Any]:
+    prompt = _prepare_edit_prompt(prompt)
+
+    if not image_data:
+        return {
+            "status": "error",
+            "answer": "No image was provided for editing.",
+        }
+
+    if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
+        return {
+            "status": "error",
+            "answer": "Invalid or overly long edit prompt.",
+        }
+
+    if not POLLINATIONS_API_KEY:
         return {
             "status": "error",
             "answer": "Image editing failed.",
-            "error": "HF_TOKEN environment variables are missing.",
+            "error": "Quantum1 environment variable is missing.",
         }
 
     try:
-        image_bytes = _image_data_to_bytes(image_data, image_mime)
+        mime = _allowed_image_mime(image_mime)
+        image_bytes = _image_data_to_bytes(image_data, mime)
+
+        response = _multipart_edit_request(
+            image_bytes=image_bytes,
+            image_mime=mime,
+            prompt=prompt,
+            model=POLLINATIONS_IMAGE_EDIT_MODEL,
+            timeout=300,
+        )
+
+        data_url = _extract_pollinations_image(response)
+
+        return {
+            "status": "completed",
+            "model": POLLINATIONS_IMAGE_EDIT_MODEL,
+            "provider": "Pollinations",
+            "mime": data_url.split(";", 1)[0].replace("data:", ""),
+            "data": data_url,
+            "answer": "Image edited successfully with Pollinations.",
+        }
     except Exception as exc:
         return {
             "status": "error",
             "answer": "Image editing failed.",
             "error": f"{type(exc).__name__}: {exc}",
         }
-
-    tokens = list(HF_TOKENS)
-    random.shuffle(tokens)
-    errors: list[str] = []
-    attempt = 0
-
-    models = [IMAGE_EDIT_MODEL, *IMAGE_EDIT_FALLBACK_MODELS]
-
-    for model in models:
-        for provider in IMAGE_EDIT_PROVIDERS:
-            for token in tokens:
-                attempt += 1
-                try:
-                    client = InferenceClient(
-                        provider=provider,
-                        api_key=token,
-                        timeout=IMAGE_EDIT_TIMEOUT,
-                    )
-
-                    image = client.image_to_image(
-                        image_bytes,
-                        prompt=prompt,
-                        model=model,
-                        num_inference_steps=IMAGE_EDIT_STEPS,
-                    )
-
-                    return {
-                        "status": "completed",
-                        "model": model,
-                        "provider": provider,
-                        "mime": "image/png",
-                        "data": _image_to_png_data_url(image),
-                        "answer": "Image edited successfully.",
-                    }
-
-                except Exception as exc:
-                    errors.append(
-                        f"HF edit attempt {attempt} ({model}, {provider}): "
-                        f"{type(exc).__name__}: {str(exc)[:350]}"
-                    )
-
-    return {
-        "status": "error",
-        "answer": "Image editing failed.",
-        "error": " | ".join(errors[-4:]),
-    }
