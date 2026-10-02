@@ -506,7 +506,6 @@ def _prepare_edit_prompt(prompt: str) -> str:
         ("और", "and"),
         ("पेड़", "tree"),
         ("जंगल", "forest"),
-        ("海", "ocean"),
         ("समुद्र", "ocean"),
         ("आसमान", "sky"),
         ("आदमी", "man"),
