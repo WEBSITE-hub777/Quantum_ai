@@ -328,6 +328,8 @@ def _extract_pollinations_image(response: dict[str, Any]) -> str:
     if item.get("b64_json"):
         return "data:image/png;base64," + str(item["b64_json"])
 
+    # Never expose a provider URL to the frontend. Download it on the
+    # backend and convert it to an inline data URL first.
     if item.get("url"):
         return _download_generated_image(str(item["url"]))
 
@@ -338,12 +340,16 @@ def _extract_pollinations_image(response: dict[str, Any]) -> str:
 
 
 def _download_generated_image(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise RuntimeError("Pollinations returned an invalid image URL.")
+
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "Quantum-Queen-AI/1.0"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
+        with urllib.request.urlopen(request, timeout=60) as response:
             content_type = response.headers.get_content_type().lower()
             data = response.read(MAX_IMAGE_BYTES + 1)
     except Exception as exc:
@@ -356,8 +362,70 @@ def _download_generated_image(url: str) -> str:
     if not data:
         raise RuntimeError("Generated image is empty.")
 
-    if content_type not in {"image/jpeg", "image/png", "image/webp"}:
-        content_type = "image/png"
+    # Do not turn an HTML/error page into a fake PNG data URL.
+    allowed = {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "image/svg+xml",
+    }
+    if content_type not in allowed:
+        preview = data[:120].decode("utf-8", errors="replace").replace("\n", " ")
+        raise RuntimeError(
+            f"Generated URL returned non-image content ({content_type}). "
+            f"Preview: {preview}"
+        )
+
+    return (
+        f"data:{content_type};base64,"
+        + base64.b64encode(data).decode("ascii")
+    )
+
+
+def _generate_image_via_direct_get(prompt: str) -> str:
+    """Generate directly from Pollinations and always return image bytes as a data URL.
+
+    This avoids surfacing provider-hosted URLs or proxy pages to the browser.
+    """
+    encoded_prompt = urllib.parse.quote(prompt, safe="")
+    query = urllib.parse.urlencode({"model": POLLINATIONS_IMAGE_MODEL})
+    url = f"{POLLINATIONS_BASE_URL}/image/{encoded_prompt}?{query}"
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
+            "User-Agent": "Quantum-Queen-AI/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            content_type = response.headers.get_content_type().lower()
+            data = response.read(MAX_IMAGE_BYTES + 1)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Pollinations direct image generation failed: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    if len(data) > MAX_IMAGE_BYTES:
+        raise RuntimeError("Generated image is larger than the 20 MiB limit.")
+    if not data:
+        raise RuntimeError("Pollinations returned an empty image.")
+
+    allowed = {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "image/svg+xml",
+    }
+    if content_type not in allowed:
+        preview = data[:160].decode("utf-8", errors="replace").replace("\n", " ")
+        raise RuntimeError(
+            f"Pollinations direct endpoint returned non-image content ({content_type}). "
+            f"Preview: {preview}"
+        )
 
     return (
         f"data:{content_type};base64,"
@@ -454,17 +522,9 @@ def generate_image(prompt: str) -> dict[str, Any]:
     ).strip() or prompt
 
     try:
-        response = _pollinations_json_post(
-            "/v1/images/generations",
-            {
-                "model": POLLINATIONS_IMAGE_MODEL,
-                "prompt": clean_prompt,
-                "response_format": "b64_json",
-            },
-            timeout=300,
-        )
-
-        data_url = _extract_pollinations_image(response)
+        # Use Pollinations' native image endpoint and keep the generated
+        # bytes entirely on the backend. The browser receives only a data URL.
+        data_url = _generate_image_via_direct_get(clean_prompt)
 
         return {
             "status": "completed",
