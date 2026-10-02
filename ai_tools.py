@@ -276,6 +276,10 @@ HF_IMAGE_EDIT_MODEL = os.getenv(
     "black-forest-labs/FLUX.1-Kontext-dev",
 ).strip()
 
+HF_VISION_FALLBACK_MODEL = os.getenv("HF_VISION_FALLBACK_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct").strip()
+HF_IMAGE_FALLBACK_MODEL = os.getenv("HF_IMAGE_FALLBACK_MODEL", "Qwen/Qwen-Image").strip()
+HF_IMAGE_EDIT_FALLBACK_MODEL = os.getenv("HF_IMAGE_EDIT_FALLBACK_MODEL", "Qwen/Qwen-Image-Edit").strip()
+
 
 def _hf_image_clients() -> list[InferenceClient]:
     if not HF_TOKENS:
@@ -333,25 +337,27 @@ def understand_image(
         ]
 
         errors: list[str] = []
-        for client in _hf_image_clients():
-            try:
-                response = client.chat.completions.create(
-                    model=HF_VISION_MODEL,
-                    messages=messages,
-                    max_tokens=4096,
-                    temperature=0.2,
-                )
-                answer = _extract_response_text(response)
-                if answer:
-                    return {
-                        "status": "completed",
-                        "model": HF_VISION_MODEL,
-                        "provider": "Hugging Face",
-                        "answer": answer,
-                    }
-                errors.append("empty response")
-            except Exception as exc:
-                errors.append(f"{type(exc).__name__}: {str(exc)[:250]}")
+        models = [HF_VISION_MODEL, HF_VISION_FALLBACK_MODEL]
+        for model_name in dict.fromkeys(models):
+            for client in _hf_image_clients():
+                try:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        max_tokens=4096,
+                        temperature=0.2,
+                    )
+                    answer = _extract_response_text(response)
+                    if answer:
+                        return {
+                            "status": "completed",
+                            "model": model_name,
+                            "provider": "Hugging Face",
+                            "answer": answer,
+                        }
+                    errors.append(f"{model_name}: empty response")
+                except Exception as exc:
+                    errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
         raise RuntimeError(" | ".join(errors[-4:]) or "All vision attempts failed.")
     except Exception as exc:
@@ -365,15 +371,13 @@ def understand_image(
 def _hf_generate_image(prompt: str) -> str:
     errors: list[str] = []
 
-    for client in _hf_image_clients():
-        try:
-            image = client.text_to_image(
-                prompt=prompt,
-                model=HF_IMAGE_MODEL,
-            )
-            return _pil_to_data_url(image)
-        except Exception as exc:
-            errors.append(f"{type(exc).__name__}: {str(exc)[:250]}")
+    for model_name in dict.fromkeys([HF_IMAGE_MODEL, HF_IMAGE_FALLBACK_MODEL]):
+        for client in _hf_image_clients():
+            try:
+                image = client.text_to_image(prompt=prompt, model=model_name)
+                return _pil_to_data_url(image)
+            except Exception as exc:
+                errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
     raise RuntimeError(
         "All Hugging Face image-generation attempts failed: "
@@ -459,16 +463,13 @@ def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> str:
     source = Image.open(io.BytesIO(image_bytes))
     errors: list[str] = []
 
-    for client in _hf_image_clients():
-        try:
-            edited = client.image_to_image(
-                source,
-                prompt=prompt,
-                model=HF_IMAGE_EDIT_MODEL,
-            )
-            return _pil_to_data_url(edited)
-        except Exception as exc:
-            errors.append(f"{type(exc).__name__}: {str(exc)[:250]}")
+    for model_name in dict.fromkeys([HF_IMAGE_EDIT_MODEL, HF_IMAGE_EDIT_FALLBACK_MODEL]):
+        for client in _hf_image_clients():
+            try:
+                edited = client.image_to_image(source, prompt=prompt, model=model_name)
+                return _pil_to_data_url(edited)
+            except Exception as exc:
+                errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
     raise RuntimeError(
         "All Hugging Face image-edit attempts failed: "
