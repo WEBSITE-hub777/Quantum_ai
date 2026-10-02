@@ -268,11 +268,28 @@ async function send(){
   const loading = addLoadingMessage();
 
   try {
-    const res = await fetch(API + "/chat", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(payload)
-    });
+    let res;
+    let lastError;
+    for(let attempt=0; attempt<2; attempt++){
+      try{
+        if(attempt>0){
+          await fetch(API + "/health", {cache:"no-store"}).catch(()=>{});
+          await new Promise(r=>setTimeout(r, 2500));
+        }
+        res = await fetch(API + "/chat", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        if(res.ok) break;
+        const errData = await res.json().catch(()=>({}));
+        throw new Error(errData.detail || "Backend error");
+      }catch(err){
+        lastError = err;
+        if(attempt===0) continue;
+        throw lastError;
+      }
+    }
 
     const data = await res.json();
     if(!res.ok) throw new Error(data.detail || "Backend error");
