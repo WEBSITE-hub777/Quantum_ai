@@ -56,6 +56,14 @@ HF_MODEL_NAME = os.getenv(
     "deepseek-ai/DeepSeek-V4.1-Flash",
 ).strip()
 
+# Final normal-chat fallback after Hugging Face DeepSeek and all Groq keys.
+POLLINATIONS_API_KEY = os.getenv("Quantum1", "").strip()
+POLLINATIONS_API_URL = "https://gen.pollinations.ai/v1/chat/completions"
+POLLINATIONS_CHAT_MODEL = os.getenv(
+    "POLLINATIONS_CHAT_MODEL",
+    "deepseek/deepseek-v4.1-flash",
+).strip()
+
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.65"))
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "30"))
@@ -88,9 +96,11 @@ def queen_status() -> dict[str, Any]:
         "app": APP_NAME,
         "groq_keys_loaded": len(GROQ_API_KEYS),
         "primary_engine": "Hugging Face DeepSeek",
-        "fallback_engine": "Groq Cloud API",
+        "fallback_engine": "Groq1 → Groq2 → Groq3 → Groq4 → Pollinations",
         "model": HF_MODEL_NAME,
         "fallback_model": GROQ_MODEL,
+        "pollinations_configured": bool(POLLINATIONS_API_KEY),
+        "pollinations_model": POLLINATIONS_CHAT_MODEL,
     }
 
 
@@ -170,6 +180,55 @@ def ask_queen_hf(messages: list[dict[str, str]]) -> str:
 
     return answer
 
+
+
+def ask_queen_pollinations(messages: list[dict[str, str]]) -> str:
+    """Final fallback for normal text chat."""
+    if not POLLINATIONS_API_KEY:
+        raise RuntimeError("Quantum1 environment variable is missing.")
+
+    import json
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps({
+        "model": POLLINATIONS_CHAT_MODEL,
+        "messages": messages,
+        "max_tokens": MAX_TOKENS,
+        "temperature": TEMPERATURE,
+    }).encode("utf-8")
+
+    request = urllib.request.Request(
+        POLLINATIONS_API_URL,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"Pollinations HTTP {exc.code}: {detail}") from exc
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError("Pollinations returned invalid JSON.") from exc
+
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"Pollinations returned no choices: {str(payload)[:1000]}")
+
+    answer = (choices[0].get("message", {}).get("content") or "").strip()
+    if not answer:
+        raise RuntimeError("Pollinations returned an empty response.")
+
+    return answer
 
 
 def classify_multilingual_intent(user_message: str, has_image: bool = False) -> str:
@@ -259,10 +318,16 @@ def ask_queen(
     except Exception as exc:
         groq_error = _short_error(exc)
 
-    # Never label every provider failure as "high traffic". Return a useful
-    # diagnostic so the real provider problem can be identified.
+    pollinations_error = None
+    try:
+        return ask_queen_pollinations(messages)
+    except Exception as exc:
+        pollinations_error = _short_error(exc)
+
+    # Final diagnostic only after every configured provider has failed.
     return (
         "AI service error. "
         f"Hugging Face: {hf_error or 'not available'}. "
-        f"Groq: {groq_error or 'not available'}."
+        f"Groq: {groq_error or 'not available'}. "
+        f"Pollinations: {pollinations_error or 'not available'}."
     )
