@@ -263,7 +263,7 @@ def _extract_response_text(response: Any) -> str:
 # ---------------------------------------------------------------------------
 HF_VISION_MODEL = os.getenv(
     "HF_VISION_MODEL",
-    "meta-llama/Llama-3.2-11B-Vision-Instruct",
+    "Qwen/Qwen2.5-VL-3B-Instruct",
 ).strip()
 
 HF_IMAGE_MODEL = os.getenv(
@@ -273,12 +273,12 @@ HF_IMAGE_MODEL = os.getenv(
 
 HF_IMAGE_EDIT_MODEL = os.getenv(
     "HF_IMAGE_EDIT_MODEL",
-    "black-forest-labs/FLUX.1-Kontext-dev",
+    "Qwen/Qwen-Image-Edit",
 ).strip()
 
-HF_VISION_FALLBACK_MODEL = os.getenv("HF_VISION_FALLBACK_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct").strip()
+HF_VISION_FALLBACK_MODEL = os.getenv("HF_VISION_FALLBACK_MODEL", "meta-llama/Llama-3.2-11B-Vision-Instruct").strip()
 HF_IMAGE_FALLBACK_MODEL = os.getenv("HF_IMAGE_FALLBACK_MODEL", "Qwen/Qwen-Image").strip()
-HF_IMAGE_EDIT_FALLBACK_MODEL = os.getenv("HF_IMAGE_EDIT_FALLBACK_MODEL", "Qwen/Qwen-Image-Edit").strip()
+HF_IMAGE_EDIT_FALLBACK_MODEL = os.getenv("HF_IMAGE_EDIT_FALLBACK_MODEL", "black-forest-labs/FLUX.1-Kontext-dev").strip()
 
 
 def _hf_image_clients() -> list[InferenceClient]:
@@ -385,18 +385,62 @@ def _hf_generate_image(prompt: str) -> str:
     )
 
 
+def _prepare_generation_prompt(prompt: str) -> str:
+    text = re.sub(r"\s+", " ", prompt.strip())
+    replacements = (
+        ("एक इमेज बनाओ", "create an image"),
+        ("एक इमेज बना दो", "create an image"),
+        ("इमेज बनाओ", "create an image"),
+        ("इमेज बना दो", "create an image"),
+        ("एक फोटो बनाओ", "create a photo"),
+        ("फोटो बनाओ", "create a photo"),
+        ("तस्वीर बनाओ", "create an image"),
+        ("चित्र बनाओ", "create an image"),
+        ("बनाओ", "create"),
+        ("बना दो", "create"),
+        ("बना", "create"),
+        ("बनवा दो", "create"),
+        ("तैयार करो", "create"),
+        ("एक", "a"),
+        ("और", "and"),
+        ("के साथ", "with"),
+        ("के ऊपर", "on top of"),
+        ("के नीचे", "under"),
+        ("पीछे", "behind"),
+        ("सामने", "in front of"),
+        ("बैकग्राउंड", "background"),
+        ("जंगल", "forest"),
+        ("आसमान", "sky"),
+        ("समुद्र", "ocean"),
+        ("पहाड़", "mountain"),
+        ("घर", "house"),
+        ("पेड़", "tree"),
+        ("फूल", "flower"),
+        ("सूरज", "sun"),
+        ("चाँद", "moon"),
+        ("लड़का", "boy"),
+        ("लड़की", "girl"),
+        ("बिल्ली", "cat"),
+        ("कुत्ता", "dog"),
+    )
+    for source, target in replacements:
+        text = text.replace(source, target)
+    text = re.sub(
+        r"^(generate|create|make|draw)\s+(an?\s+)?"
+        r"(image|picture|photo|illustration)?\s*(of|about)?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    return text or prompt
+
+
 def generate_image(prompt: str) -> dict[str, Any]:
     prompt = prompt.strip()
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
 
-    clean_prompt = re.sub(
-        r"^(generate|create|make|draw)\s+(an?\s+)?"
-        r"(image|picture|photo|illustration)?\s*(of|about)?\s*",
-        "",
-        prompt,
-        flags=re.IGNORECASE,
-    ).strip() or prompt
+    clean_prompt = _prepare_generation_prompt(prompt)
 
     try:
         data_url = _hf_generate_image(clean_prompt)
@@ -414,7 +458,6 @@ def generate_image(prompt: str) -> dict[str, Any]:
             "answer": "Image generation failed.",
             "error": f"{type(exc).__name__}: {exc}",
         }
-
 
 def _prepare_edit_prompt(prompt: str) -> str:
     text = re.sub(r"\s+", " ", prompt.strip())
@@ -451,6 +494,26 @@ def _prepare_edit_prompt(prompt: str) -> str:
         ("बना दो", "add"),
         ("जोड़ दो", "add"),
         ("हटा दो", "remove"),
+        ("हटा", "remove"),
+        ("निकाल दो", "remove"),
+        ("निकाल", "remove"),
+        ("बदल दो", "change"),
+        ("बदल", "change"),
+        ("इसका", "its"),
+        ("इसकी", "its"),
+        ("इसमें", "in it"),
+        ("एक", "a"),
+        ("और", "and"),
+        ("पेड़", "tree"),
+        ("जंगल", "forest"),
+        ("海", "ocean"),
+        ("समुद्र", "ocean"),
+        ("आसमान", "sky"),
+        ("आदमी", "man"),
+        ("लड़का", "boy"),
+        ("लड़की", "girl"),
+        ("बिल्ली", "cat"),
+        ("कुत्ता", "dog"),
     )
     for source, target in replacements:
         text = text.replace(source, target)
