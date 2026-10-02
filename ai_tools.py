@@ -259,185 +259,55 @@ def _extract_response_text(response: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pollinations image stack
+# Hugging Face Llama + FLUX image stack
 # ---------------------------------------------------------------------------
-POLLINATIONS_API_KEY = os.getenv("Quantum1", "").strip()
-POLLINATIONS_BASE_URL = "https://gen.pollinations.ai"
-POLLINATIONS_VISION_MODEL = os.getenv(
-    "POLLINATIONS_VISION_MODEL",
-    "deepseek/deepseek-v4-flash-vision-exp",
-).strip()
-POLLINATIONS_IMAGE_MODEL = os.getenv(
-    "POLLINATIONS_IMAGE_MODEL",
-    "black-forest-labs/flux.1-kontext-pro",
-).strip()
-POLLINATIONS_IMAGE_EDIT_MODEL = os.getenv(
-    "POLLINATIONS_IMAGE_EDIT_MODEL",
-    "black-forest-labs/flux.1-kontext-pro",
+HF_VISION_MODEL = os.getenv(
+    "HF_VISION_MODEL",
+    "meta-llama/Llama-3.2-11B-Vision-Instruct",
 ).strip()
 
+HF_IMAGE_MODEL = os.getenv(
+    "HF_IMAGE_MODEL",
+    "black-forest-labs/FLUX.1-schnell",
+).strip()
 
-def _pollinations_headers() -> dict[str, str]:
-    if not POLLINATIONS_API_KEY:
-        raise RuntimeError("Quantum1 environment variable is missing.")
-    return {
-        "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-
-def _pollinations_json_post(
-    path: str,
-    payload: dict[str, Any],
-    timeout: int = 180,
-) -> dict[str, Any]:
-    import json
-    import urllib.error
-
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        f"{POLLINATIONS_BASE_URL}{path}",
-        data=body,
-        headers=_pollinations_headers(),
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1500]
-        raise RuntimeError(f"Pollinations HTTP {exc.code}: {detail}") from exc
-
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError("Pollinations returned invalid JSON.") from exc
-
-    if not isinstance(payload, dict):
-        raise RuntimeError("Pollinations returned an invalid response.")
-    return payload
+HF_IMAGE_EDIT_MODEL = os.getenv(
+    "HF_IMAGE_EDIT_MODEL",
+    "black-forest-labs/FLUX.1-Kontext-dev",
+).strip()
 
 
-def _extract_pollinations_image(response: dict[str, Any]) -> str:
-    items = response.get("data") or []
-    if not items or not isinstance(items[0], dict):
-        raise RuntimeError(f"Pollinations returned no image: {str(response)[:1200]}")
+def _hf_image_clients() -> list[InferenceClient]:
+    if not HF_TOKENS:
+        raise RuntimeError("No HF tokens configured.")
 
-    item = items[0]
-    if item.get("b64_json"):
-        return "data:image/png;base64," + str(item["b64_json"])
-
-    # Never expose a provider URL to the frontend. Download it on the
-    # backend and convert it to an inline data URL first.
-    if item.get("url"):
-        return _download_generated_image(str(item["url"]))
-
-    raise RuntimeError(
-        f"Pollinations image response contained neither b64_json nor url: "
-        f"{str(response)[:1200]}"
-    )
-
-
-def _download_generated_image(url: str) -> str:
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise RuntimeError("Pollinations returned an invalid image URL.")
-
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "Quantum-Queen-AI/1.0"},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            content_type = response.headers.get_content_type().lower()
-            data = response.read(MAX_IMAGE_BYTES + 1)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not download generated image: {type(exc).__name__}: {exc}"
-        ) from exc
-
-    if len(data) > MAX_IMAGE_BYTES:
-        raise RuntimeError("Generated image is larger than the 20 MiB limit.")
-    if not data:
-        raise RuntimeError("Generated image is empty.")
-
-    # Do not turn an HTML/error page into a fake PNG data URL.
-    allowed = {
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-        "image/svg+xml",
-    }
-    if content_type not in allowed:
-        preview = data[:120].decode("utf-8", errors="replace").replace("\n", " ")
-        raise RuntimeError(
-            f"Generated URL returned non-image content ({content_type}). "
-            f"Preview: {preview}"
+    tokens = list(HF_TOKENS)
+    random.shuffle(tokens)
+    return [
+        InferenceClient(
+            api_key=token,
+            provider="auto",
+            timeout=180,
         )
-
-    return (
-        f"data:{content_type};base64,"
-        + base64.b64encode(data).decode("ascii")
-    )
+        for token in tokens
+    ]
 
 
-def _generate_image_via_direct_get(prompt: str) -> str:
-    """Generate directly from Pollinations and always return image bytes as a data URL.
+def _pil_to_data_url(image: Any) -> str:
+    if not hasattr(image, "save"):
+        raise RuntimeError("Hugging Face returned an invalid image object.")
 
-    This avoids surfacing provider-hosted URLs or proxy pages to the browser.
-    """
-    encoded_prompt = urllib.parse.quote(prompt, safe="")
-    query = urllib.parse.urlencode({"model": POLLINATIONS_IMAGE_MODEL})
-    url = f"{POLLINATIONS_BASE_URL}/image/{encoded_prompt}?{query}"
-
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
-            "User-Agent": "Quantum-Queen-AI/1.0",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=300) as response:
-            content_type = response.headers.get_content_type().lower()
-            data = response.read(MAX_IMAGE_BYTES + 1)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Pollinations direct image generation failed: {type(exc).__name__}: {exc}"
-        ) from exc
-
-    if len(data) > MAX_IMAGE_BYTES:
-        raise RuntimeError("Generated image is larger than the 20 MiB limit.")
-    if not data:
-        raise RuntimeError("Pollinations returned an empty image.")
-
-    allowed = {
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-        "image/svg+xml",
-    }
-    if content_type not in allowed:
-        preview = data[:160].decode("utf-8", errors="replace").replace("\n", " ")
-        raise RuntimeError(
-            f"Pollinations direct endpoint returned non-image content ({content_type}). "
-            f"Preview: {preview}"
-        )
-
-    return (
-        f"data:{content_type};base64,"
-        + base64.b64encode(data).decode("ascii")
-    )
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
-def _prepare_pollinations_image(image_data: str, image_mime: str | None) -> str:
-    normalized = normalize_image_data(image_data, image_mime)
-    if normalized.startswith("data:image/"):
-        return normalized
-    return normalized
+def _hf_vision_content(image_url: str, question: str) -> list[dict[str, Any]]:
+    return [
+        {"type": "text", "text": question},
+        {"type": "image_url", "image_url": {"url": image_url}},
+    ]
 
 
 def understand_image(
@@ -454,58 +324,61 @@ def understand_image(
     )
 
     try:
-        image_url = _prepare_pollinations_image(image_data, image_mime)
-
-        response = _pollinations_json_post(
-            "/v1/chat/completions",
+        image_url = normalize_image_data(image_data, image_mime)
+        messages = [
             {
-                "model": POLLINATIONS_VISION_MODEL,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": question},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_url},
-                            },
-                        ],
+                "role": "user",
+                "content": _hf_vision_content(image_url, question),
+            }
+        ]
+
+        errors: list[str] = []
+        for client in _hf_image_clients():
+            try:
+                response = client.chat.completions.create(
+                    model=HF_VISION_MODEL,
+                    messages=messages,
+                    max_tokens=4096,
+                    temperature=0.2,
+                )
+                answer = _extract_response_text(response)
+                if answer:
+                    return {
+                        "status": "completed",
+                        "model": HF_VISION_MODEL,
+                        "provider": "Hugging Face",
+                        "answer": answer,
                     }
-                ],
-                "temperature": 0.2,
-                "max_tokens": 4096,
-            },
-            timeout=180,
-        )
+                errors.append("empty response")
+            except Exception as exc:
+                errors.append(f"{type(exc).__name__}: {str(exc)[:250]}")
 
-        choices = response.get("choices") or []
-        if not choices:
-            raise RuntimeError("Pollinations vision returned no choices.")
-
-        content = choices[0].get("message", {}).get("content", "")
-        if isinstance(content, list):
-            content = "\n".join(
-                str(item.get("text", ""))
-                for item in content
-                if isinstance(item, dict) and item.get("text")
-            )
-
-        answer = str(content).strip()
-        if not answer:
-            raise RuntimeError("Pollinations vision returned an empty response.")
-
-        return {
-            "status": "completed",
-            "model": POLLINATIONS_VISION_MODEL,
-            "provider": "Pollinations",
-            "answer": answer,
-        }
+        raise RuntimeError(" | ".join(errors[-4:]) or "All vision attempts failed.")
     except Exception as exc:
         return {
             "status": "error",
             "answer": "Image analysis failed.",
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+def _hf_generate_image(prompt: str) -> str:
+    errors: list[str] = []
+
+    for client in _hf_image_clients():
+        try:
+            image = client.text_to_image(
+                prompt=prompt,
+                model=HF_IMAGE_MODEL,
+            )
+            return _pil_to_data_url(image)
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {str(exc)[:250]}")
+
+    raise RuntimeError(
+        "All Hugging Face image-generation attempts failed: "
+        + " | ".join(errors[-4:])
+    )
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
@@ -522,17 +395,14 @@ def generate_image(prompt: str) -> dict[str, Any]:
     ).strip() or prompt
 
     try:
-        # Use Pollinations' native image endpoint and keep the generated
-        # bytes entirely on the backend. The browser receives only a data URL.
-        data_url = _generate_image_via_direct_get(clean_prompt)
-
+        data_url = _hf_generate_image(clean_prompt)
         return {
             "status": "completed",
-            "model": POLLINATIONS_IMAGE_MODEL,
-            "provider": "Pollinations",
-            "mime": data_url.split(";", 1)[0].replace("data:", ""),
+            "model": HF_IMAGE_MODEL,
+            "provider": "Hugging Face",
+            "mime": "image/png",
             "data": data_url,
-            "answer": "Image generated successfully with Pollinations.",
+            "answer": "Image generated successfully with FLUX.",
         }
     except Exception as exc:
         return {
@@ -583,78 +453,27 @@ def _prepare_edit_prompt(prompt: str) -> str:
     return text
 
 
-def _multipart_edit_request(
-    image_bytes: bytes,
-    image_mime: str,
-    prompt: str,
-    model: str,
-    timeout: int = 300,
-) -> dict[str, Any]:
-    """Call the OpenAI-compatible Pollinations image-edit endpoint."""
-    import json
-    import urllib.error
-    import uuid
+def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> str:
+    from PIL import Image
 
-    boundary = "----QuantumQueenBoundary" + uuid.uuid4().hex
-    chunks: list[bytes] = []
+    source = Image.open(io.BytesIO(image_bytes))
+    errors: list[str] = []
 
-    def add_field(name: str, value: str) -> None:
-        chunks.append(
-            (
-                f"--{boundary}\r\n"
-                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-                f"{value}\r\n"
-            ).encode("utf-8")
-        )
+    for client in _hf_image_clients():
+        try:
+            edited = client.image_to_image(
+                source,
+                prompt=prompt,
+                model=HF_IMAGE_EDIT_MODEL,
+            )
+            return _pil_to_data_url(edited)
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {str(exc)[:250]}")
 
-    extension = {
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/webp": "webp",
-        "image/gif": "gif",
-    }.get(image_mime, "png")
-
-    add_field("model", model)
-    add_field("prompt", prompt)
-    add_field("response_format", "b64_json")
-
-    chunks.append(
-        (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="image"; filename="input.{extension}"\r\n'
-            f"Content-Type: {image_mime}\r\n\r\n"
-        ).encode("utf-8")
+    raise RuntimeError(
+        "All Hugging Face image-edit attempts failed: "
+        + " | ".join(errors[-4:])
     )
-    chunks.append(image_bytes)
-    chunks.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
-
-    request = urllib.request.Request(
-        f"{POLLINATIONS_BASE_URL}/v1/images/edits",
-        data=b"".join(chunks),
-        headers={
-            "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1500]
-        raise RuntimeError(
-            f"Pollinations edit HTTP {exc.code}: {detail}"
-        ) from exc
-
-    try:
-        result = json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError("Pollinations edit returned invalid JSON.") from exc
-
-    if not isinstance(result, dict):
-        raise RuntimeError("Pollinations edit returned an invalid response.")
-    return result
 
 
 def edit_image(
@@ -676,34 +495,18 @@ def edit_image(
             "answer": "Invalid or overly long edit prompt.",
         }
 
-    if not POLLINATIONS_API_KEY:
-        return {
-            "status": "error",
-            "answer": "Image editing failed.",
-            "error": "Quantum1 environment variable is missing.",
-        }
-
     try:
         mime = _allowed_image_mime(image_mime)
         image_bytes = _image_data_to_bytes(image_data, mime)
-
-        response = _multipart_edit_request(
-            image_bytes=image_bytes,
-            image_mime=mime,
-            prompt=prompt,
-            model=POLLINATIONS_IMAGE_EDIT_MODEL,
-            timeout=300,
-        )
-
-        data_url = _extract_pollinations_image(response)
+        data_url = _hf_edit_image(image_bytes, prompt, mime)
 
         return {
             "status": "completed",
-            "model": POLLINATIONS_IMAGE_EDIT_MODEL,
-            "provider": "Pollinations",
-            "mime": data_url.split(";", 1)[0].replace("data:", ""),
+            "model": HF_IMAGE_EDIT_MODEL,
+            "provider": "Hugging Face",
+            "mime": "image/png",
             "data": data_url,
-            "answer": "Image edited successfully with Pollinations.",
+            "answer": "Image edited successfully with FLUX.",
         }
     except Exception as exc:
         return {
@@ -711,3 +514,4 @@ def edit_image(
             "answer": "Image editing failed.",
             "error": f"{type(exc).__name__}: {exc}",
         }
+    
