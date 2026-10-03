@@ -124,9 +124,15 @@ input:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22
 
 <script>
 const API = "https://quantum-ai-1-og05.onrender.com";
-let user = JSON.parse(localStorage.getItem("qq_user") || "null");
+let user = null;
+try {
+  user = JSON.parse(localStorage.getItem("qq_user") || "null");
+} catch {
+  localStorage.removeItem("qq_user");
+}
 let history = [];
 let selectedImage = null;
+let isSending = false;
 
 const $ = id => document.getElementById(id);
 const escapeHTML = s => String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
@@ -161,8 +167,8 @@ $("fileInput").onchange = e => {
     return;
   }
 
-  if(f.size > 10 * 1024 * 1024){
-    alert("Image must be smaller than 10 MB.");
+  if(f.size > 20 * 1024 * 1024){
+    alert("Image must be 20 MB or smaller.");
     e.target.value = "";
     return;
   }
@@ -190,11 +196,21 @@ function addMessage(role,text,imageData=null){
   const row=document.createElement("div"); row.className="msg "+role;
   const bubble=document.createElement("div"); bubble.className="bubble";
   if(imageData){
-    const img=document.createElement("img");img.className="preview";img.src=imageData;img.alt="Uploaded image";bubble.appendChild(img);
+    const img=document.createElement("img");
+    img.className="preview";
+    img.src=imageData;
+    img.alt=role==="assistant" ? "AI generated image" : "Uploaded image";
+    bubble.appendChild(img);
     if(role==="assistant") addDownload(img.src, "quantum-queen-generated.png", bubble);
   }
-  if(text){bubble.insertAdjacentHTML("beforeend",renderAnswer(text))}
-  row.appendChild(bubble);$("chat").appendChild(row);$("chat").scrollTop=$("chat").scrollHeight;return bubble;
+  if(text){
+    bubble.insertAdjacentHTML("beforeend",renderAnswer(text));
+    bindCodeActions(bubble);
+  }
+  row.appendChild(bubble);
+  $("chat").appendChild(row);
+  $("chat").scrollTop=$("chat").scrollHeight;
+  return bubble;
 }
 
 function addLoadingMessage(){
@@ -217,36 +233,103 @@ function addLoadingMessage(){
 }
 
 function addDownload(href,name,parent){
-  const a=document.createElement("a");a.className="download";a.textContent="Download";a.href=href;a.download=name;a.style.display="inline-block";a.style.textDecoration="none";a.style.marginTop="6px";parent.appendChild(a);
+  const a=document.createElement("a");
+  a.className="download";
+  a.textContent="Download";
+  a.href=href;
+  a.download=name;
+  a.style.display="inline-block";
+  a.style.textDecoration="none";
+  a.style.marginTop="6px";
+  parent.appendChild(a);
 }
 
 function renderAnswer(text){
   const source=String(text ?? "").replace(/\r\n/g,"\n");
-  const token=/```([^\n`]*)\n([\s\S]*?)```/g;
+  const token=/\`\`\`([^\n\`]*)\n([\s\S]*?)\`\`\`/g;
   let out="", last=0, match;
+
+  const addPlain = value => escapeHTML(value).replace(/\n/g,"<br>");
+
   while((match=token.exec(source))!==null){
-    out += escapeHTML(source.slice(last,match.index));
+    out += addPlain(source.slice(last,match.index));
     const lang=(match[1]||"code").trim()||"code";
     const code=match[2].replace(/\n$/,'');
     const id="code_"+Math.random().toString(36).slice(2);
-    out += `<div class="code-wrap"><div class="code-head"><span>${escapeHTML(lang)}</span><div class="code-actions"><button type="button" onclick="copyCode('${id}')">Copy</button><button type="button" onclick="downloadCode('${id}','${escapeHTML(lang)}')">Download file</button></div></div><pre id="${id}">${escapeHTML(code)}</pre></div>`;
+    out += `<div class="code-wrap">
+      <div class="code-head">
+        <span>${escapeHTML(lang)}</span>
+        <div class="code-actions">
+          <button type="button" class="copy-code" data-code-id="${escapeHTML(id)}">Copy</button>
+          <button type="button" class="download-code" data-code-id="${escapeHTML(id)}" data-code-lang="${escapeHTML(lang)}">Download file</button>
+        </div>
+      </div>
+      <pre id="${escapeHTML(id)}">${escapeHTML(code)}</pre>
+    </div>`;
     last=token.lastIndex;
   }
-  out += escapeHTML(source.slice(last));
-  return out.replace(/\n/g,"<br>");
+
+  out += addPlain(source.slice(last));
+  return out;
 }
 
-window.copyCode=async id=>{const t=$(id).textContent;await navigator.clipboard.writeText(t);alert("Code copied!");};
-window.downloadCode=(id,lang)=>{
+async function copyCode(id){
+  const node=$(id);
+  if(!node) return;
+  const text=node.textContent || "";
+  try{
+    if(navigator.clipboard?.writeText){
+      await navigator.clipboard.writeText(text);
+    }else{
+      const ta=document.createElement("textarea");
+      ta.value=text;
+      ta.style.position="fixed";
+      ta.style.opacity="0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    alert("Code copied!");
+  }catch{
+    alert("Could not copy code. Please select and copy it manually.");
+  }
+}
+
+function downloadCode(id,lang){
+  const node=$(id);
+  if(!node) return;
   const extMap={html:"html",css:"css",javascript:"js",js:"js",python:"py",py:"py",json:"json",xml:"xml",sql:"sql",yaml:"yaml",yml:"yml",md:"md",txt:"txt",jsx:"jsx",tsx:"tsx",typescript:"ts",ts:"ts"};
-  const ext=extMap[lang.toLowerCase()]||"txt";
-  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([$(id).textContent],{type:"text/plain"}));a.download=`quantum-queen-file.${ext}`;a.click();URL.revokeObjectURL(a.href);
-};
+  const ext=extMap[String(lang||"").toLowerCase()]||"txt";
+  const a=document.createElement("a");
+  const href=URL.createObjectURL(new Blob([node.textContent],{type:"text/plain"}));
+  a.href=href;
+  a.download=`quantum-queen-file.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(href),1000);
+}
+
+function bindCodeActions(root){
+  root.querySelectorAll(".copy-code").forEach(button=>{
+    button.onclick=()=>copyCode(button.dataset.codeId);
+  });
+  root.querySelectorAll(".download-code").forEach(button=>{
+    button.onclick=()=>downloadCode(button.dataset.codeId,button.dataset.codeLang);
+  });
+}
 
 async function send(){
+  if(isSending) return;
+
   const message=$("message").value.trim();
   if(!message && !selectedImage) return;
-  
+
+  isSending=true;
+  $("sendBtn").disabled=true;
+  $("sendBtn").style.opacity="0.6";
+
   const image = selectedImage;
   $("message").value = "";
   clearSelectedImage();
@@ -264,72 +347,105 @@ async function send(){
   }
 
   history.push({role:"user", content: message || "Analyze uploaded image"});
-  
+
   const loading = addLoadingMessage();
 
   try {
-    let res;
-    let lastError;
+    let res = null;
+    let lastError = null;
+
     for(let attempt=0; attempt<2; attempt++){
       try{
         if(attempt>0){
           await fetch(API + "/health", {cache:"no-store"}).catch(()=>{});
-          await new Promise(r=>setTimeout(r, 2500));
+          await new Promise(r=>setTimeout(r, 1800));
         }
+
         res = await fetch(API + "/chat", {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload)
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(payload),
+          cache: "no-store"
         });
+
         if(res.ok) break;
+
         const errData = await res.json().catch(()=>({}));
-        throw new Error(errData.detail || "Backend error");
+        const messageText = errData.detail || `Backend returned HTTP ${res.status}`;
+
+        // Retry server wake-up failures, but do not blindly repeat validation
+        // errors such as a malformed payload.
+        if(res.status >= 500 || res.status === 429 || res.status === 503){
+          throw new Error(messageText);
+        }
+        throw new Error(messageText);
       }catch(err){
-        lastError = err;
-        if(attempt===0) continue;
-        throw lastError;
+        lastError=err;
+        if(attempt===0 && !(err instanceof TypeError)){
+          // A structured HTTP error is usually deterministic; only retry when
+          // the response status itself indicates a transient server problem.
+          const msg=String(err?.message||"");
+          if(!/HTTP 5\d\d|HTTP 429|HTTP 503/i.test(msg)) throw err;
+        }
+        if(attempt===1) throw lastError;
       }
     }
 
-    const data = await res.json();
-    if(!res.ok) throw new Error(data.detail || "Backend error");
+    if(!res) throw lastError || new Error("No response from backend.");
 
-    loading.parentElement.remove();
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail || `Backend returned HTTP ${res.status}`);
+
+    if(loading?.parentElement) loading.parentElement.remove();
+
+    if(data.status === "error"){
+      const detail =
+        data?.vision?.error ||
+        data?.image?.error ||
+        data?.image_edit?.error ||
+        data?.error ||
+        "";
+      const answer = data.answer || "The requested AI operation failed.";
+      const suffix = detail ? `\\n\\nTechnical detail: ${detail}` : "";
+      addMessage("assistant", answer + suffix);
+      history.push({role:"assistant", content:answer});
+      return;
+    }
 
     const imageData = data?.image?.data;
     const hasGeneratedImage = Boolean(
       imageData &&
       typeof imageData === "string" &&
-      (imageData.startsWith("data:image/") || imageData.startsWith("https://") || imageData.startsWith("http://"))
+      /^(data:image\/|https?:\/\/)/i.test(imageData)
     );
 
-    // Image-generation/edit responses must be rendered as images, not as
-    // plain text/URLs. Keep the normal answer only when there is no image.
-    const answer = hasGeneratedImage
-      ? ""
-      : (data.answer || "No answer returned.");
-
+    const answer = hasGeneratedImage ? "" : (data.answer || "No answer returned.");
     const bubble = addMessage("assistant", answer);
-    history.push({role: "assistant", content: data.answer || ""});
+    history.push({role:"assistant", content:data.answer || ""});
 
     if(hasGeneratedImage){
       const img = document.createElement("img");
-      img.className = "preview";
-      img.src = imageData;
-      img.alt = data.type === "image_edit" ? "AI edited image" : "AI generated image";
-      img.onload = () => { $("chat").scrollTop = $("chat").scrollHeight; };
-      img.onerror = () => {
+      img.className="preview";
+      img.src=imageData;
+      img.alt=data.type==="image_edit" ? "AI edited image" : "AI generated image";
+      img.onload=()=>{ $("chat").scrollTop=$("chat").scrollHeight; };
+      img.onerror=()=>{
         img.remove();
-        bubble.insertAdjacentHTML("beforeend", "<br><span>Generated image could not be displayed.</span>");
+        bubble.insertAdjacentHTML("beforeend","<br><span>Generated image could not be displayed.</span>");
       };
       bubble.appendChild(img);
-      addDownload(imageData, "quantum-queen-generated.png", bubble);
+      addDownload(imageData,"quantum-queen-generated.png",bubble);
     }
-  } catch(err) {
-    if(loading) loading.parentElement.remove();
-    addMessage("assistant", "Connection error: " + err.message + " Please check that the Render backend is awake.");
+  }catch(err){
+    if(loading?.parentElement) loading.parentElement.remove();
+    addMessage("assistant","Connection error: " + (err?.message || "Request failed") + " Please check that the Render backend is awake.");
+  }finally{
+    isSending=false;
+    $("sendBtn").disabled=false;
+    $("sendBtn").style.opacity="";
   }
 }
+
 </script>
 </body>
 </html>
