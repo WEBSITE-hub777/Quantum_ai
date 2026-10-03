@@ -284,7 +284,13 @@ function addDownload(href,name,parent){
 }
 
 function renderAnswer(text){
-  const source=String(text ?? "").replace(/\r\n/g,"\n");
+  // Image generation/editing results are rendered from data.image.data below.
+  // Do not turn model-hallucinated Imgur/other external markdown links into
+  // fake "edited images".
+  const source=String(text ?? "")
+    .replace(/!\[[^\]]*\]\(https?:\/\/[^)]+\)/gi,"")
+    .replace(/\[[^\]]*\]\(https?:\/\/[^)]+\)/gi,"")
+    .replace(/\r\n/g,"\n");
   const token=/\`\`\`([^\n\`]*)\n([\s\S]*?)\`\`\`/g;
   let out="", last=0, match;
 
@@ -455,12 +461,16 @@ async function send(){
     const hasGeneratedImage = Boolean(
       imageData &&
       typeof imageData === "string" &&
-      /^(data:image\/|https?:\/\/)/i.test(imageData)
+      /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(imageData)
     );
 
     const answer = hasGeneratedImage ? "" : (data.answer || "No answer returned.");
     const bubble = addMessage("assistant", answer);
     history.push({role:"assistant", content:data.answer || ""});
+
+    if(imageData && !hasGeneratedImage && data.type === "image_edit"){
+      addMessage("assistant","The image editor did not return the edited image data, so no external image link was used.");
+    }
 
     if(hasGeneratedImage){
       const img = document.createElement("img");
