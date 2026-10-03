@@ -1,7 +1,6 @@
 import base64
 import io
 import os
-import random
 import re
 import urllib.parse
 import urllib.request
@@ -22,7 +21,7 @@ HF_TOKENS = list(dict.fromkeys([
 
 VISION_MODEL = os.getenv(
     "VISION_MODEL",
-    "deepseek-ai/DeepSeek-V4.1-Flash",
+    "Qwen/Qwen2.5-VL-3B-Instruct",
 ).strip()
 
 MAX_MATH_LENGTH = 12000
@@ -42,7 +41,6 @@ def get_vision_clients() -> list[InferenceClient]:
         raise RuntimeError("HF_TOKEN environment variables are missing.")
 
     tokens = list(HF_TOKENS)
-    random.shuffle(tokens)
 
     return [
         InferenceClient(
@@ -189,7 +187,7 @@ def _download_own_image_as_data_url(url: str, fallback_mime: str) -> str:
         image_bytes = response.read(MAX_IMAGE_BYTES + 1)
 
     if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise ValueError("Image is larger than the 10 MB limit.")
+        raise ValueError("Image is larger than the 20 MB limit.")
 
     encoded = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{content_type};base64,{encoded}"
@@ -272,7 +270,7 @@ def _image_data_to_bytes(image_data: str, image_mime: str | None) -> bytes:
     if not image_bytes:
         raise ValueError("Image data is empty.")
     if len(image_bytes) > MAX_IMAGE_BYTES:
-        raise ValueError("Image is larger than the 10 MB limit.")
+        raise ValueError("Image is larger than the 20 MB limit.")
 
     return image_bytes
 
