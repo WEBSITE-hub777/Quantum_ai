@@ -126,7 +126,6 @@ def ask_queen_groq(messages: list[dict[str, str]]) -> str:
         raise RuntimeError("No Groq API Keys configured.")
 
     keys = list(GROQ_API_KEYS)
-    random.shuffle(keys)
     errors: list[str] = []
 
     for index, key in enumerate(keys, start=1):
@@ -271,7 +270,6 @@ Output only the label.
     try:
         if GROQ_API_KEYS:
             keys = list(GROQ_API_KEYS)
-            random.shuffle(keys)
             for key in keys:
                 try:
                     client = Groq(api_key=key)
