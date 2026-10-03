@@ -173,16 +173,45 @@ $("fileInput").onchange = e => {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = function(evt) {
+  const finishImage = dataUrl => {
     selectedImage = {
-      dataUrl: evt.target.result,
-      mime: f.type,
+      dataUrl,
+      mime: dataUrl.startsWith("data:image/jpeg") ? "image/jpeg" : f.type,
       name: f.name
     };
     $("selected").innerHTML = `📷 <b>${escapeHTML(f.name)}</b> <button type="button" id="removeImgBtn" style="background:none;border:none;color:#ff4d4d;cursor:pointer;font-weight:bold;margin-left:6px;">✕</button>`;
     $("removeImgBtn").onclick = clearSelectedImage;
     $("message").focus();
+  };
+
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    const original = String(evt.target.result || "");
+    // Large PNG/WebP/JPEG uploads can make the JSON body unnecessarily huge.
+    // Keep small files untouched; downscale/compress large raster images.
+    if(f.size <= 4 * 1024 * 1024 || f.type === "image/gif"){
+      finishImage(original);
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      const maxSide = 1600;
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext("2d");
+      if(!ctx){
+        finishImage(original);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const compressed = canvas.toDataURL("image/jpeg", 0.88);
+      finishImage(compressed);
+    };
+    img.onerror = () => finishImage(original);
+    img.src = original;
   };
   reader.readAsDataURL(f);
 };
