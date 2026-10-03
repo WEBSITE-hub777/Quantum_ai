@@ -580,8 +580,15 @@ def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> tuple[st
     for model_name in dict.fromkeys([HF_IMAGE_EDIT_MODEL, HF_IMAGE_EDIT_FALLBACK_MODEL]):
         for client in _hf_image_clients():
             try:
-                edited = client.image_to_image(source, prompt=prompt, model=model_name)
-                return _pil_to_data_url(edited), model_name
+                edited = client.image_to_image(
+                    image=source,
+                    prompt=prompt,
+                    model=model_name,
+                )
+                data_url = _pil_to_data_url(edited)
+                if not data_url.startswith("data:image/"):
+                    raise RuntimeError("Image editor did not return image data.")
+                return data_url, model_name
             except Exception as exc:
                 errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
@@ -615,13 +622,20 @@ def edit_image(
         image_bytes = _image_data_to_bytes(image_data, mime)
         data_url, used_model = _hf_edit_image(image_bytes, prompt, mime)
 
+        if not isinstance(data_url, str) or not data_url.startswith("data:image/"):
+            return {
+                "status": "error",
+                "answer": "Image editing failed to return the edited image.",
+                "error": "Expected a data:image URL from the image editor.",
+            }
+
         return {
             "status": "completed",
             "model": used_model,
             "provider": "Hugging Face",
             "mime": "image/png",
             "data": data_url,
-            "answer": f"Image edited successfully with {used_model}.",
+            "answer": "",
         }
     except Exception as exc:
         return {
