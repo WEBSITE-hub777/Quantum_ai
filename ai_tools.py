@@ -195,12 +195,51 @@ def _download_own_image_as_data_url(url: str, fallback_mime: str) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _optimize_local_image_bytes(image_bytes: bytes, mime: str) -> tuple[bytes, str]:
+    """
+    Keep large browser-uploaded images provider-friendly.
+    Images are downscaled to a reasonable vision/edit size and compressed only
+    when that produces a smaller payload.
+    """
+    try:
+        from PIL import Image
+
+        source = Image.open(io.BytesIO(image_bytes))
+        source.load()
+
+        max_side = 1600
+        if max(source.size) > max_side:
+            source.thumbnail(
+                (max_side, max_side),
+                Image.Resampling.LANCZOS,
+            )
+
+        working = source.convert("RGB") if source.mode not in {"RGB", "L"} else source
+        output = io.BytesIO()
+        working.save(output, format="JPEG", quality=88, optimize=True)
+        compressed = output.getvalue()
+
+        if len(compressed) < len(image_bytes):
+            return compressed, "image/jpeg"
+    except Exception:
+        pass
+
+    return image_bytes, mime
+
+
 def normalize_image_data(image_data: str, image_mime: str | None) -> str:
     value = image_data.strip()
     mime = _allowed_image_mime(image_mime)
 
     if value.startswith("data:image/"):
-        return value
+        try:
+            _, encoded = value.split(",", 1)
+            raw = base64.b64decode(encoded, validate=True)
+            optimized, optimized_mime = _optimize_local_image_bytes(raw, mime)
+            encoded = base64.b64encode(optimized).decode("ascii")
+            return f"data:{optimized_mime};base64,{encoded}"
+        except Exception as exc:
+            raise ValueError("Invalid image data.") from exc
 
     if value.startswith("https://") or value.startswith("http://"):
         return _download_own_image_as_data_url(value, mime)
@@ -276,7 +315,10 @@ HF_IMAGE_EDIT_MODEL = os.getenv(
     "Qwen/Qwen-Image-Edit",
 ).strip()
 
-HF_VISION_FALLBACK_MODEL = os.getenv("HF_VISION_FALLBACK_MODEL", "meta-llama/Llama-3.2-11B-Vision-Instruct").strip()
+HF_VISION_FALLBACK_MODEL = os.getenv(
+    "HF_VISION_FALLBACK_MODEL",
+    "zai-org/GLM-4.5V",
+).strip()
 HF_IMAGE_FALLBACK_MODEL = os.getenv("HF_IMAGE_FALLBACK_MODEL", "Qwen/Qwen-Image").strip()
 HF_IMAGE_EDIT_FALLBACK_MODEL = os.getenv("HF_IMAGE_EDIT_FALLBACK_MODEL", "black-forest-labs/FLUX.1-Kontext-dev").strip()
 
@@ -286,7 +328,6 @@ def _hf_image_clients() -> list[InferenceClient]:
         raise RuntimeError("No HF tokens configured.")
 
     tokens = list(HF_TOKENS)
-    random.shuffle(tokens)
     return [
         InferenceClient(
             api_key=token,
@@ -368,14 +409,14 @@ def understand_image(
         }
 
 
-def _hf_generate_image(prompt: str) -> str:
+def _hf_generate_image(prompt: str) -> tuple[str, str]:
     errors: list[str] = []
 
     for model_name in dict.fromkeys([HF_IMAGE_MODEL, HF_IMAGE_FALLBACK_MODEL]):
         for client in _hf_image_clients():
             try:
                 image = client.text_to_image(prompt=prompt, model=model_name)
-                return _pil_to_data_url(image)
+                return _pil_to_data_url(image), model_name
             except Exception as exc:
                 errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
@@ -443,14 +484,14 @@ def generate_image(prompt: str) -> dict[str, Any]:
     clean_prompt = _prepare_generation_prompt(prompt)
 
     try:
-        data_url = _hf_generate_image(clean_prompt)
+        data_url, used_model = _hf_generate_image(clean_prompt)
         return {
             "status": "completed",
-            "model": HF_IMAGE_MODEL,
+            "model": used_model,
             "provider": "Hugging Face",
             "mime": "image/png",
             "data": data_url,
-            "answer": "Image generated successfully with FLUX.",
+            "answer": f"Image generated successfully with {used_model}.",
         }
     except Exception as exc:
         return {
@@ -516,10 +557,23 @@ def _prepare_edit_prompt(prompt: str) -> str:
     )
     for source, target in replacements:
         text = text.replace(source, target)
+
+    text = re.sub(
+        r"\bbehind the subject\s+(?:a\s+)?(.+?)\s+add$",
+        r"add a \1 behind the subject",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\bin front of the subject\s+(?:a\s+)?(.+?)\s+add$",
+        r"add a \1 in front of the subject",
+        text,
+        flags=re.IGNORECASE,
+    )
     return text
 
 
-def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> str:
+def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> tuple[str, str]:
     from PIL import Image
 
     source = Image.open(io.BytesIO(image_bytes))
@@ -529,7 +583,7 @@ def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> str:
         for client in _hf_image_clients():
             try:
                 edited = client.image_to_image(source, prompt=prompt, model=model_name)
-                return _pil_to_data_url(edited)
+                return _pil_to_data_url(edited), model_name
             except Exception as exc:
                 errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
@@ -561,15 +615,15 @@ def edit_image(
     try:
         mime = _allowed_image_mime(image_mime)
         image_bytes = _image_data_to_bytes(image_data, mime)
-        data_url = _hf_edit_image(image_bytes, prompt, mime)
+        data_url, used_model = _hf_edit_image(image_bytes, prompt, mime)
 
         return {
             "status": "completed",
-            "model": HF_IMAGE_EDIT_MODEL,
+            "model": used_model,
             "provider": "Hugging Face",
             "mime": "image/png",
             "data": data_url,
-            "answer": "Image edited successfully with FLUX.",
+            "answer": f"Image edited successfully with {used_model}.",
         }
     except Exception as exc:
         return {
