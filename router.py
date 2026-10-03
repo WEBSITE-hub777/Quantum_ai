@@ -33,9 +33,21 @@ IMAGE_GENERATION_PATTERNS = (
     "generate image", "create image", "make an image", "draw an image",
     "generate a picture", "create a picture", "make a picture",
     "generate photo", "create photo", "make photo", "draw", "paint",
+    "product image", "product photo", "advertising image", "advertising photo",
+    "ad image", "ad photo", "promo image", "promotional image",
+    "poster", "thumbnail", "catalog image", "catalog photo", "marketing image",
+    "create artwork", "generate artwork",
     # Hindi / Hinglish
     "image bana", "image banao", "photo bana", "photo banao",
     "picture bana", "picture banao", "banao photo",
+    "image banana", "image banani", "image banani hai", "image banana hai",
+    "photo banana", "photo banani", "photo banani hai", "photo banana hai",
+    "image chahiye", "photo chahiye", "picture chahiye", "tasveer chahiye",
+    "photo ke liye", "image ke liye", "photo of", "picture of", "image of",
+    "ki photo", "ka photo", "ki image", "ka image", "sale ki photo",
+    "sale ka photo", "product ki photo", "product ka photo",
+    "product ki image", "product ka image", "ad ke liye", "poster bana",
+    "thumbnail bana", "catalog photo",
     "इमेज बनाओ", "इमेज बना", "फोटो बनाओ", "फोटो बना",
     "चित्र बनाओ", "चित्र बना", "तस्वीर बनाओ", "तस्वीर बना",
     # Urdu
@@ -84,16 +96,21 @@ CAPABILITY_PATTERNS = (
 # so words like "make", "create", or "change" cannot accidentally route
 # a normal text-only chat message to FLUX.
 IMAGE_EDIT_ACTION_PATTERNS = (
-    # English
-    "edit", "edited", "editing", "modify", "modified", "change", "changed",
-    "replace", "remove", "delete", "erase", "add", "insert", "put",
-    "swap", "transform", "convert", "retouch", "enhance", "improve",
-    "restore", "fix", "clean up", "recolor", "resize", "extend",
-    "expand", "uncrop", "upscale", "upgrade", "redesign",
+    # English: explicit editing instructions. Avoid single generic verbs such as
+    # "change" or "add" because they also occur in normal visual questions.
+    "edit this", "edit the image", "edit the photo", "edit the picture",
+    "modify this", "modify the image", "modify the photo", "modify the picture",
+    "change this", "change the background", "change the color",
+    "replace the background", "replace the", "remove the background",
+    "remove the", "delete the", "erase the", "add a", "add an",
+    "insert a", "insert an", "put a", "put an", "swap the",
     "make this", "make it", "turn this into", "turn it into",
     "create from this", "generate from this", "redraw this",
+    "recolor", "resize", "crop", "uncrop", "upscale", "retouch",
+    "enhance this", "improve this", "restore this", "clean up this",
+    "background change", "background removal",
     # Hinglish / Hindi transliterations
-    "bana do", "bana de", "banao", "banado", "badal do", "badal de",
+    "bana do", "bana de", "banado", "badal do", "badal de",
     "hata do", "hata de", "nikal do", "nikal de", "jod do", "jod de",
     "laga do", "laga de", "daal do", "dal do", "add kar", "remove kar",
     "change kar", "edit kar", "modify kar", "replace kar", "fix kar",
@@ -101,8 +118,8 @@ IMAGE_EDIT_ACTION_PATTERNS = (
     "sundar bana", "theek kar", "saaf kar", "bada kar", "chhota kar",
     "upgrade kar", "background change", "background badal",
     # Devanagari
-    "बना दो", "बना दे", "बनाओ", "बनादो", "बदल दो", "बदल दे",
-    "बदलो", "हटा दो", "हटा दे", "निकाल दो", "निकाल दे",
+    "बना दो", "बना दे", "बनादो", "बदल दो", "बदल दे",
+    "हटा दो", "हटा दे", "निकाल दो", "निकाल दे",
     "जोड़ दो", "जोड़ दे", "डाल दो", "डाल दे", "लगाओ", "लगा दो",
     "एडिट", "बदल", "हटाओ", "जोड़ो", "बढ़ाओ", "घटाओ",
     "सुधारो", "ठीक करो", "अच्छा बना", "अच्छी बना", "सुंदर बना",
@@ -195,15 +212,75 @@ def looks_like_math_structure(message: str) -> bool:
 
 
 def looks_like_image_edit(message: str) -> bool:
-    # With an uploaded image, either an explicit visual-edit action or a
-    # reference to a visual location/object is enough to send the request
-    # to the image editor. This catches natural prompts such as:
-    # "Iske pichhe ek forest bana do".
-    return (
-        contains_pattern(message, IMAGE_EDIT_ACTION_PATTERNS)
-        or contains_pattern(message, IMAGE_EDIT_CONTEXT_PATTERNS)
-        or contains_pattern(message, IMAGE_EDIT_PATTERNS)
+    """
+    Detect an actual edit command without stealing ordinary vision questions.
+    Examples that must stay VISION:
+      "What is in the background?"
+      "Who is this?"
+      "What color is the shirt?"
+    """
+    text = normalize(message)
+
+    # Natural-language inspection questions should go to vision unless the
+    # user also gave an explicit edit command.
+    inspection_starts = (
+        "what ", "what's ", "who ", "which ", "where ", "when ", "why ",
+        "how many", "how much", "describe ", "analyze ", "tell me ",
+        "can you see ", "do you see ", "is there ", "are there ",
+        "क्या ", "कौन ", "क्या है", "इसमें क्या", "पीछे क्या",
+        "کتنا", "کون", "کیا",
     )
+    if text.endswith("?") or any(text.startswith(prefix) for prefix in inspection_starts):
+        return contains_pattern(text, IMAGE_EDIT_PATTERNS) or contains_pattern(text, (
+            "edit this", "edit the image", "remove the", "add a", "add an",
+            "change the", "replace the", "bana do", "badal do", "hata do",
+            "निकाल दो", "हटा दो", "बदल दो", "जोड़ दो", "बना दो",
+        ))
+
+    return contains_pattern(text, IMAGE_EDIT_ACTION_PATTERNS) or contains_pattern(
+        text, IMAGE_EDIT_PATTERNS
+    )
+
+
+def looks_like_image_generation(message: str) -> bool:
+    text = normalize(message)
+    if not text or contains_pattern(text, CAPABILITY_PATTERNS):
+        return False
+
+    visual_words = (
+        "image", "images", "photo", "photos", "picture", "pictures",
+        "चित्र", "इमेज", "फोटो", "तस्वीर",
+        "تصویر", "فوٹو", "صورة",
+        "imagen", "foto", "imagem", "fotografia",
+        "изображение", "картинка", "фото",
+        "ছবি", "ফটো", "gambar",
+    )
+    request_signals = (
+        "generate", "create", "make", "draw", "paint", "design",
+        "want an", "need an", "need a", "show me", "send me",
+        "give me", "chahiye", "chahiye hai", "banana", "banani",
+        "bana", "banao", "banado", "banani hai", "banana hai",
+        "दिखाओ", "चाहिए", "बनाना", "बनानी", "बनाओ", "बना दो",
+        "تصویر بناؤ", "تصویر بنا", "انشئ", "اصنع",
+        "crear", "genera", "creer", "crée", "fais",
+        "crie", "gere", "gerar", "создай", "сделай", "нарисуй",
+        "buat", "buatkan", "hasilkan",
+        "की फोटो", "का फोटो", "की इमेज", "का इमेज",
+        "के लिए फोटो", "के लिए इमेज", "product", "sale", "poster",
+        "thumbnail", "catalog", "advertising", "advertisement", "promo",
+    )
+    if not any(word in text for word in visual_words):
+        return False
+    if any(signal in text for signal in request_signals):
+        return True
+
+    # Phrases such as "photo of Taj Mahal" or "Patanjali ki photo" are
+    # naturally image requests even when "generate" is omitted.
+    return bool(re.search(
+        r"(?:image|photo|picture|फोटो|इमेज|तस्वीर|चित्र|تصویر|فوٹو|صورة)"
+        r"\s+(?:of|for|की|का|के|کے|لئے|लिए)\s+\S+",
+        text,
+    ))
 
 
 def classify_request(
@@ -226,7 +303,7 @@ def classify_request(
             return Intent.IMAGE_EDIT
         return Intent.VISION
 
-    if contains_pattern(message, IMAGE_GENERATION_PATTERNS):
+    if contains_pattern(message, IMAGE_GENERATION_PATTERNS) or looks_like_image_generation(message):
         return Intent.IMAGE_GENERATION
 
     # Handle natural Hindi/Hinglish phrasing such as:
@@ -257,7 +334,7 @@ def classify_request(
     if (
         any(word in normalized_message for word in image_words)
         and any(word in normalized_message for word in create_words)
-    ):
+    ) or looks_like_image_generation(message):
         return Intent.IMAGE_GENERATION
 
     if contains_pattern(message, QUANTUM_PATTERNS):
