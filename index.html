@@ -126,7 +126,17 @@ input:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22
 const API = "https://quantum-ai-1-og05.onrender.com";
 let user = null;
 try {
-  user = JSON.parse(localStorage.getItem("qq_user") || "null");
+  const savedUser = JSON.parse(localStorage.getItem("qq_user") || "null");
+  if (
+    savedUser &&
+    typeof savedUser === "object" &&
+    typeof savedUser.name === "string" &&
+    typeof savedUser.email === "string"
+  ) {
+    user = savedUser;
+  } else {
+    localStorage.removeItem("qq_user");
+  }
 } catch {
   localStorage.removeItem("qq_user");
 }
