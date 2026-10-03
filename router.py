@@ -112,8 +112,11 @@ IMAGE_EDIT_ACTION_PATTERNS = (
     # Hinglish / Hindi transliterations
     "bana do", "bana de", "banado", "badal do", "badal de",
     "hata do", "hata de", "nikal do", "nikal de", "jod do", "jod de",
-    "laga do", "laga de", "daal do", "dal do", "add kar", "remove kar",
-    "change kar", "edit kar", "modify kar", "replace kar", "fix kar",
+    "laga do", "laga de", "daal do", "dal do",
+    "kar do", "kardo", "kar de", "karde", "karna hai", "karna",
+    "remove do", "change do", "edit do", "replace do",
+    "add kar", "remove kar", "change kar", "edit kar", "modify kar",
+    "replace kar", "fix kar",
     "improve kar", "enhance kar", "accha bana", "achha bana",
     "sundar bana", "theek kar", "saaf kar", "bada kar", "chhota kar",
     "upgrade kar", "background change", "background badal",
@@ -236,10 +239,33 @@ def looks_like_image_edit(message: str) -> bool:
             "remove the background", "remove the", "add a", "add an",
             "change the background", "change the color", "replace the",
             "bana do", "badal do", "hata do", "nikal do", "jod do",
+            "kar do", "kardo", "kar de", "karde",
             "निकाल दो", "हटा दो", "बदल दो", "जोड़ दो", "बना दो",
             "फोटो एडिट", "इमेज एडिट", "तस्वीर एडिट",
         )
         return contains_pattern(text, explicit_question_edits)
+
+    # Common Hinglish edit commands such as:
+    # "iska background black kar do"
+    # "is photo ko clean kar do"
+    # "background hata do"
+    # These are not inspection questions; they explicitly request a change.
+    edit_verbs = (
+        "kar do", "kardo", "kar de", "karde", "karna hai",
+        "bana do", "bana de", "badal do", "badal de",
+        "hata do", "hata de", "nikal do", "nikal de",
+        "jod do", "jod de", "laga do", "laga de",
+        "change kar", "edit kar", "remove kar", "add kar",
+        "replace kar", "modify kar", "fix kar",
+    )
+    edit_context = (
+        "background", "colour", "color", "remove", "replace", "add",
+        "delete", "erase", "change", "edit", "modify", "crop",
+        "resize", "upscale", "retouch", "enhance", "clean",
+        "improve", "black", "white",
+    )
+    if any(v in text for v in edit_verbs) and any(c in text for c in edit_context):
+        return True
 
     return contains_pattern(text, IMAGE_EDIT_ACTION_PATTERNS) or contains_pattern(
         text, IMAGE_EDIT_PATTERNS
@@ -391,6 +417,19 @@ def process_request(
             image_data=image_data,
             image_mime=image_mime,
         )
+        edit_status = img_res.get("status", "completed")
+        edit_data = img_res.get("data")
+        if edit_status == "completed" and not (
+            isinstance(edit_data, str)
+            and edit_data.startswith("data:image/")
+        ):
+            img_res = {
+                **img_res,
+                "status": "error",
+                "answer": "Image editing did not return the edited image.",
+                "error": "The image editor returned no data:image result.",
+            }
+
         return {
             "type": "image_edit",
             "status": img_res.get("status", "completed"),
