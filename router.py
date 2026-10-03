@@ -231,11 +231,15 @@ def looks_like_image_edit(message: str) -> bool:
         "کتنا", "کون", "کیا",
     )
     if text.endswith("?") or any(text.startswith(prefix) for prefix in inspection_starts):
-        return contains_pattern(text, IMAGE_EDIT_PATTERNS) or contains_pattern(text, (
-            "edit this", "edit the image", "remove the", "add a", "add an",
-            "change the", "replace the", "bana do", "badal do", "hata do",
+        explicit_question_edits = (
+            "edit this", "edit the image", "edit the photo", "edit the picture",
+            "remove the background", "remove the", "add a", "add an",
+            "change the background", "change the color", "replace the",
+            "bana do", "badal do", "hata do", "nikal do", "jod do",
             "निकाल दो", "हटा दो", "बदल दो", "जोड़ दो", "बना दो",
-        ))
+            "फोटो एडिट", "इमेज एडिट", "तस्वीर एडिट",
+        )
+        return contains_pattern(text, explicit_question_edits)
 
     return contains_pattern(text, IMAGE_EDIT_ACTION_PATTERNS) or contains_pattern(
         text, IMAGE_EDIT_PATTERNS
