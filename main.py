@@ -110,7 +110,7 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
 
     data = await file.read()
     if len(data) > MAX_IMAGE_SIZE:
-        raise HTTPException(status_code=413, detail="Image larger than 10 MB limit.")
+        raise HTTPException(status_code=413, detail="Image larger than 20 MB limit.")
 
     filename = f"{uuid.uuid4().hex}{ALLOWED_IMAGE_TYPES[file.content_type]}"
     target = MEDIA_DIR / filename
