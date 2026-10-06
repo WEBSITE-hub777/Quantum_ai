@@ -424,6 +424,39 @@ def _hf_generate_image(prompt: str) -> tuple[str, str]:
     )
 
 
+def _pollinations_generate_image(prompt: str) -> tuple[str, str]:
+    api_key = os.getenv("Quantum1", "").strip()
+    if not api_key:
+        raise RuntimeError("Pollinations image API key is not configured.")
+
+    model = os.getenv("POLLINATIONS_IMAGE_MODEL", "flux").strip() or "flux"
+    encoded_prompt = urllib.parse.quote(prompt, safe="")
+    url = f"https://gen.pollinations.ai/image/{encoded_prompt}?model={urllib.parse.quote(model, safe='/')}"
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Quantum-Queen-AI/1.0",
+        },
+        method="GET",
+    )
+
+    with urllib.request.urlopen(request, timeout=180) as response:
+        image_bytes = response.read(MAX_IMAGE_BYTES + 1)
+        content_type = response.headers.get("Content-Type", "image/jpeg").split(";", 1)[0].lower()
+
+    if not image_bytes:
+        raise RuntimeError("Pollinations returned an empty image.")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise RuntimeError("Pollinations image is larger than the 20 MB limit.")
+    if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        content_type = "image/jpeg"
+
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{content_type};base64,{encoded}", f"Pollinations/{model}"
+
+
 def _prepare_generation_prompt(prompt: str) -> str:
     text = re.sub(r"\s+", " ", prompt.strip())
     replacements = (
@@ -491,12 +524,26 @@ def generate_image(prompt: str) -> dict[str, Any]:
             "data": data_url,
             "answer": f"Image generated successfully with {used_model}.",
         }
-    except Exception as exc:
-        return {
-            "status": "error",
-            "answer": "Image generation failed.",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+    except Exception as hf_exc:
+        try:
+            data_url, used_model = _pollinations_generate_image(clean_prompt)
+            return {
+                "status": "completed",
+                "model": used_model,
+                "provider": "Pollinations",
+                "mime": "image/png",
+                "data": data_url,
+                "answer": f"Image generated successfully with {used_model}.",
+            }
+        except Exception as pollinations_exc:
+            return {
+                "status": "error",
+                "answer": "Image generation failed.",
+                "error": (
+                    f"Hugging Face: {type(hf_exc).__name__}: {hf_exc} | "
+                    f"Pollinations: {type(pollinations_exc).__name__}: {pollinations_exc}"
+                ),
+            }
 
 def _prepare_edit_prompt(prompt: str) -> str:
     text = re.sub(r"\s+", " ", prompt.strip())
