@@ -41,7 +41,12 @@ input:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22
 .welcome{max-width:850px;margin:8vh auto 0;text-align:center}.welcome h2{font-size:clamp(27px,5vw,45px);margin:0 0 10px}.welcome p{color:#60758d}.chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}.chip{border:1px solid #d5e5f5;background:#fff;color:#31506e;border-radius:999px;padding:9px 13px;font-size:12px}
 .msg{max-width:900px;margin:0 auto 18px;display:flex;gap:10px}.msg.user{justify-content:flex-end}.bubble{max-width:min(800px,90%);padding:13px 15px;border-radius:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word}.assistant .bubble{background:#fff;border:1px solid #dceafa;color:#102338;box-shadow:0 8px 25px rgba(40,100,160,.06)}.user .bubble{background:linear-gradient(135deg,#087cf0,#6251e9);color:#fff}
 .msg img.preview{display:block;max-width:280px;max-height:280px;border-radius:12px;margin-bottom:10px}
-.code-wrap{margin-top:12px;border:1px solid #dbe7f3;border-radius:13px;overflow:hidden;background:#07101b;color:#eaf5ff}.code-head{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#0c1725;color:#9ccfff;font-size:11px}.code-actions{display:flex;gap:6px}.code-actions button{border:1px solid #23415e;background:#112238;color:#d8edff;border-radius:7px;padding:5px 8px;font-size:11px}.code-wrap pre{margin:0;padding:14px;overflow:auto;white-space:pre;word-break:normal;overflow-wrap:normal;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.code-wrap{max-width:100%}
+.code-wrap{margin-top:12px;border:1px solid #dbe7f3;border-radius:13px;overflow:hidden;background:#07101b;color:#eaf5ff}.code-head{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#0c1725;color:#9ccfff;font-size:11px}.code-actions{display:flex;gap:6px}.code-actions button{border:1px solid #23415e;background:#112238;color:#d8edff;border-radius:7px;padding:5px 8px;font-size:11px}.code-wrap pre{margin:0;padding:14px;overflow:auto;white-space:pre;word-break:normal;overflow-wrap:normal;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.code-wrap{max-width:100%}.code-wrap.live-code{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,1fr);grid-template-rows:auto 1fr;gap:0}
+.code-wrap.live-code .code-head{grid-column:1/-1}
+.code-wrap.live-code pre{grid-column:1;grid-row:2;min-height:360px}
+.live-preview{grid-column:2;grid-row:2;border:0;border-left:1px solid #23415e;background:#fff;width:100%;min-height:360px}
+.live-run{border:1px solid #315274;background:#10263d;color:#dff4ff;border-radius:7px;padding:5px 8px;font-size:11px}
+@media(max-width:900px){.code-wrap.live-code{grid-template-columns:1fr;grid-template-rows:auto auto auto}.code-wrap.live-code pre{grid-column:1;grid-row:2;min-height:240px}.live-preview{grid-column:1;grid-row:3;border-left:0;border-top:1px solid #23415e;min-height:300px}}
 .file-card{margin-top:12px;padding:13px;border:1px solid #cfe4fa;background:#f7fbff;border-radius:13px;display:flex;align-items:center;justify-content:space-between;gap:12px}.file-info{min-width:0}.file-name{font-weight:800;font-size:13px;overflow:hidden;text-overflow:ellipsis}.file-meta{font-size:11px;color:#7890a8;margin-top:3px}.download{border:0;border-radius:9px;background:#0c84f6;color:#fff;padding:8px 11px;font-weight:800;font-size:11px;white-space:nowrap}
 .composer{padding:12px 16px 16px;background:#fff;border-top:1px solid #dfeaf5}.composer-inner{max-width:1000px;margin:auto;border:1px solid #cfe0ef;border-radius:24px;background:#fff;box-shadow:0 8px 30px rgba(33,100,160,.08);overflow:hidden}.attach-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #edf3f8}.iconbtn{border:1px solid #dbe8f4;background:#f7fbff;color:#2d587e;border-radius:9px;padding:7px 10px;font-size:12px}.selected{font-size:12px;color:#3b5671;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}.composer textarea{border:0;border-radius:0 0 24px 24px;resize:none;min-height:54px;max-height:140px;padding:15px 16px;color:#182536;background:#fff}.composer textarea::placeholder{color:#8b97a5;opacity:1}.sendrow{display:flex;justify-content:flex-end;padding:0 10px 10px}.send{border:0;border-radius:14px;background:linear-gradient(135deg,var(--blue),var(--purple));color:#fff;padding:9px 17px;font-weight:800}
 
@@ -284,6 +289,25 @@ function addDownload(href,name,parent){
   parent.appendChild(a);
 }
 
+function buildLivePreview(code, lang){
+  const raw=String(code||'').trim();
+  const l=String(lang||'').toLowerCase();
+  let html=raw;
+  if(l==='html' || l==='htm' || /<!doctype\\s+html|<html[\\s>]/i.test(raw)){
+    html=raw;
+  }else if(l==='css'){
+    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+raw+'</style></head><body><div class="preview-demo">Live CSS preview</div></body></html>';
+  }else if(l==='javascript' || l==='js' || /(?:const|let|var|function)\\s+|document\\.|addEventListener\\(/.test(raw)){
+    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui;background:#fff}canvas{display:block}</style></head><body><script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"><\\/script><script>'+raw.replace(/<\\/script/gi,'<\\/script')+'<\\/script></body></html>';
+  }else{
+    return '';
+  }
+  return html.replace(/<\\/body>/i,'<script>window.onerror=function(m){document.body.insertAdjacentHTML("beforeend","<pre style="color:#b00;padding:12px;white-space:pre-wrap">Preview error: "+String(m)+"</pre>")};<\\/script></body>');
+}
+function openLivePreview(id, code, lang){
+  const frame=$(id); if(!frame) return;
+  frame.srcdoc=buildLivePreview(code,lang);
+}
 function renderAnswer(text){
   // Image generation/editing results are rendered from data.image.data below.
   // Do not turn model-hallucinated Imgur/other external markdown links into
@@ -302,16 +326,22 @@ function renderAnswer(text){
     const lang=(match[1]||"code").trim()||"code";
     const code=match[2].replace(/\n$/,'');
     const id="code_"+Math.random().toString(36).slice(2);
-    out += `<div class="code-wrap">
+    const previewId="preview_"+Math.random().toString(36).slice(2);
+    const canPreview=/^(html?|css|javascript|js|typescript|ts|jsx|tsx)$/i.test(lang) || /<!doctype\\s+html|<html[\\s>]|<style[\\s>]|<script[\\s>]/i.test(code);
+    const wrapClass=canPreview ? "code-wrap live-code" : "code-wrap";
+    out += `<div class="${wrapClass}">
       <div class="code-head">
         <span>${escapeHTML(lang)}</span>
         <div class="code-actions">
           <button type="button" class="copy-code" data-code-id="${escapeHTML(id)}">Copy</button>
           <button type="button" class="download-code" data-code-id="${escapeHTML(id)}" data-code-lang="${escapeHTML(lang)}">Download file</button>
+          ${canPreview ? `<button type="button" class="live-run" data-preview-id="${escapeHTML(previewId)}">Run</button>` : ""}
         </div>
       </div>
       <pre id="${escapeHTML(id)}">${escapeHTML(code)}</pre>
+      ${canPreview ? `<iframe id="${escapeHTML(previewId)}" class="live-preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" title="Live code output"></iframe>` : ""}
     </div>`;
+    if(canPreview) setTimeout(()=>openLivePreview(previewId,code,lang),0);
     last=token.lastIndex;
   }
 
@@ -357,6 +387,13 @@ function downloadCode(id,lang){
   setTimeout(()=>URL.revokeObjectURL(href),1000);
 }
 
+document.querySelectorAll(".live-run").forEach(btn=>{
+    btn.onclick=()=>{
+      const frame=$(btn.dataset.previewId);
+      const pre=btn.closest(".live-code")?.querySelector("pre");
+      if(frame && pre) frame.srcdoc=buildLivePreview(pre.textContent,btn.closest(".live-code")?.querySelector(".code-head span")?.textContent||"html");
+    };
+  });
 function bindCodeActions(root){
   root.querySelectorAll(".copy-code").forEach(button=>{
     button.onclick=()=>copyCode(button.dataset.codeId);
@@ -497,6 +534,6 @@ async function send(){
 }
 
 </script>
-<script src="quantum_sandbox.js"></script>
+
 </body>
 </html>
