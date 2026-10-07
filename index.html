@@ -293,16 +293,16 @@ function buildLivePreview(code, lang){
   const raw=String(code||'').trim();
   const l=String(lang||'').toLowerCase();
   let html=raw;
-  if(l==='html' || l==='htm' || /<!doctype\\s+html|<html[\\s>]/i.test(raw)){
+  if(l==='html' || l==='htm' || /<!doctype\s+html|<html[\s>]/i.test(raw)){
     html=raw;
   }else if(l==='css'){
     html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+raw+'</style></head><body><div class="preview-demo">Live CSS preview</div></body></html>';
   }else if(l==='javascript' || l==='js' || /(?:const|let|var|function)\\s+|document\\.|addEventListener\\(/.test(raw)){
-    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui;background:#fff}canvas{display:block}</style></head><body><script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"><\\/script><script>'+raw.replace(/<\\/script/gi,'<\\/script')+'<\\/script></body></html>';
+    html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui;background:#fff}canvas{display:block}</style></head><body><script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"><\/script><script>'+raw.replace(/<\/script/gi,'<\/script')+'<\/script></body></html>';
   }else{
     return '';
   }
-  return html.replace(/<\\/body>/i,'<script>window.onerror=function(m){document.body.insertAdjacentHTML("beforeend","<pre style="color:#b00;padding:12px;white-space:pre-wrap">Preview error: "+String(m)+"</pre>")};<\\/script></body>');
+  return html.replace(/<\/body>/i,'<script>window.onerror=function(m){document.body.insertAdjacentHTML("beforeend","<pre style="color:#b00;padding:12px;white-space:pre-wrap">Preview error: "+String(m)+"</pre>")};<\/script></body>');
 }
 function openLivePreview(id, code, lang){
   const frame=$(id); if(!frame) return;
@@ -327,7 +327,7 @@ function renderAnswer(text){
     const code=match[2].replace(/\n$/,'');
     const id="code_"+Math.random().toString(36).slice(2);
     const previewId="preview_"+Math.random().toString(36).slice(2);
-    const canPreview=/^(html?|css|javascript|js|typescript|ts|jsx|tsx)$/i.test(lang) || /<!doctype\\s+html|<html[\\s>]|<style[\\s>]|<script[\\s>]/i.test(code);
+    const canPreview=/^(html?|css|javascript|js|typescript|ts|jsx|tsx)$/i.test(lang) || /<!doctype\s+html|<html[\s>]|<style[\s>]|<script[\s>]/i.test(code);
     const wrapClass=canPreview ? "code-wrap live-code" : "code-wrap";
     out += `<div class="${wrapClass}">
       <div class="code-head">
@@ -387,19 +387,20 @@ function downloadCode(id,lang){
   setTimeout(()=>URL.revokeObjectURL(href),1000);
 }
 
-document.querySelectorAll(".live-run").forEach(btn=>{
-    btn.onclick=()=>{
-      const frame=$(btn.dataset.previewId);
-      const pre=btn.closest(".live-code")?.querySelector("pre");
-      if(frame && pre) frame.srcdoc=buildLivePreview(pre.textContent,btn.closest(".live-code")?.querySelector(".code-head span")?.textContent||"html");
-    };
-  });
 function bindCodeActions(root){
   root.querySelectorAll(".copy-code").forEach(button=>{
     button.onclick=()=>copyCode(button.dataset.codeId);
   });
   root.querySelectorAll(".download-code").forEach(button=>{
     button.onclick=()=>downloadCode(button.dataset.codeId,button.dataset.codeLang);
+  });
+  root.querySelectorAll(".live-run").forEach(btn=>{
+    btn.onclick=()=>{
+      const frame=$(btn.dataset.previewId);
+      const pre=btn.closest(".live-code")?.querySelector("pre");
+      const lang=btn.closest(".live-code")?.querySelector(".code-head span")?.textContent||"html";
+      if(frame && pre) frame.srcdoc=buildLivePreview(pre.textContent,lang);
+    };
   });
 }
 
@@ -533,6 +534,7 @@ async function send(){
   }
 }
 
+window.addEventListener("error",e=>{console.error("Quantum Queen frontend error:",e.error||e.message);});
 </script>
 
 </body>
