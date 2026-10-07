@@ -297,7 +297,7 @@ function buildLivePreview(code, lang){
     html=raw;
   }else if(l==='css'){
     html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+raw+'</style></head><body><div class="preview-demo">Live CSS preview</div></body></html>';
-  }else if(l==='javascript' || l==='js' || /(?:const|let|var|function)\\s+|document\\.|addEventListener\\(/.test(raw)){
+  }else if(l==='javascript' || l==='js' || /(?:const|let|var|function)\s+|document\.|addEventListener\(/.test(raw)){
     html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui;background:#fff}canvas{display:block}</style></head><body><script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"><\/script><script>'+raw.replace(/<\/script/gi,'<\/script')+'<\/script></body></html>';
   }else{
     return '';
