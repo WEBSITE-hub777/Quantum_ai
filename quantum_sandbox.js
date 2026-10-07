@@ -20,6 +20,10 @@ function looksLikeHTML(code){
 function looksLikeCSS(code){
   return /^\s*(?:@media|@keyframes|[.#\w][^{]{0,80}\{[\s\S]*\}\s*)+$/i.test(code) && !/[;]\s*(?:const|let|var|function)\b/.test(code);
 }
+function bridge(){
+  return '<script>window.addEventListener("message",function(e){var m=e.data||{};try{if(m.type==="video"){var c=document.querySelector("canvas");if(!c)throw Error("No canvas");if(m.stop){if(window.rec&&window.rec.state!=="inactive")window.rec.stop();return}var ms=c.captureStream(60),mt="video/webm;codecs=vp9";if(!MediaRecorder.isTypeSupported(mt))mt="video/webm";window.ch=[];window.rec=new MediaRecorder(ms,{mimeType:mt});window.rec.ondataavailable=function(a){if(a.data.size)window.ch.push(a.data)};window.rec.onstop=function(){var rd=new FileReader();rd.onload=function(){parent.postMessage({type:"download",name:"quantum-sandbox.webm",data:rd.result},"*")};rd.readAsDataURL(new Blob(window.ch,{type:mt}))};window.rec.start()}else if(m.type==="glb"){var root=window.scene||window.group||window.model;if(!root)throw Error("Expose window.scene for GLB export");if(!window.THREE||!THREE.GLTFExporter)throw Error("GLTFExporter unavailable");var ex=new THREE.GLTFExporter();ex.parse(root,function(out){var b=new Blob([out],{type:"model/gltf-binary"}),rd=new FileReader();rd.onload=function(){parent.postMessage({type:"download",name:"quantum-sandbox.glb",data:rd.result},"*")};rd.readAsDataURL(b)},{binary:true,onlyVisible:false});}}catch(err){parent.postMessage({type:"error",message:err.message},"*")}});<\\/script>';
+}
+
 function buildPreview(code){
   const q=JSON.stringify(quantum||{probabilities:{0:.5,1:.5}});
   const cleanCode=clean(code);
