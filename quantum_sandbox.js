@@ -46,7 +46,7 @@ function dl(d,n){const a=document.createElement('a');a.href=d;a.download=n;docum
 function glb(){document.getElementById('qframe')?.contentWindow.postMessage({type:'glb'},'*')}
 function video(){const f=document.getElementById('qframe'),b=document.getElementById('qvid');if(!recording){recording=true;b.textContent='Stop WebM';f.contentWindow.postMessage({type:'video'},'*')}else{recording=false;b.textContent='Record WebM';f.contentWindow.postMessage({type:'video',stop:true},'*')}}
 function gif(){document.getElementById('qstatus').textContent='Recording GIF…';document.getElementById('qframe')?.contentWindow.postMessage({type:'gif'},'*')}
-function html(){const q=JSON.stringify(quantum||{}),c=clean(document.getElementById('qcode').value).replace(/<\/script/gi,'<\\/script');const h='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}canvas{display:block}</style></head><body><script>window.QUANTUM_DATA='+q+';<\/script><script src="'+THREE_CDN+'"><\/script><script src="'+GLTF_CDN+'"><\/script><script>'+c+'<\/script></body></html>';dl('data:text/html;charset=utf-8,'+encodeURIComponent(h),'quantum-sandbox.html')}
+function html(){const h=buildPreview(document.getElementById('qcode').value);dl('data:text/html;charset=utf-8,'+encodeURIComponent(h),'quantum-sandbox.html')}
 window.addEventListener('message',e=>{const m=e.data||{};if(m.type==='download')dl(m.data,m.name);if(m.type==='error')document.getElementById('qstatus').textContent='Export error: '+m.message});
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ui);else ui();
 })();
