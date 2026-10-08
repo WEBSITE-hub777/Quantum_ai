@@ -302,7 +302,7 @@ function buildLivePreview(code, lang){
   }else{
     return '';
   }
-  return html.replace(/<\/body>/i,'<script>window.onerror=function(m){document.body.insertAdjacentHTML("beforeend","<pre style="color:#b00;padding:12px;white-space:pre-wrap">Preview error: "+String(m)+"</pre>")};<\/script></body>');
+  return html.replace(/<\/body>/i,'<script>(function(){window.onerror=function(m){document.body.insertAdjacentHTML("beforeend","<pre style="color:#b00;padding:12px;white-space:pre-wrap">Preview error: "+String(m)+"</pre>")};document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a");if(a){e.preventDefault();e.stopPropagation();}},true);document.addEventListener("submit",function(e){e.preventDefault();e.stopPropagation();},true);})();<\/script></body>');
 }
 function openLivePreview(id, code, lang){
   const frame=$(id); if(!frame) return;
