@@ -353,6 +353,51 @@ def _hf_vision_content(image_url: str, question: str) -> list[dict[str, Any]]:
     ]
 
 
+
+def _pollinations_understand_image(image_url: str, question: str) -> tuple[str, str]:
+    """Vision fallback through Pollinations' OpenAI-compatible multimodal endpoint."""
+    api_key = os.getenv("Quantum1", "").strip()
+    if not api_key:
+        raise RuntimeError("Pollinations image API key is not configured.")
+
+    payload = {
+        "model": os.getenv("POLLINATIONS_VISION_MODEL", "openai/gpt-5.4-nano").strip() or "openai/gpt-5.4-nano",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": question},
+                {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}},
+            ],
+        }],
+        "max_tokens": 2048,
+        "store": False,
+    }
+    request = urllib.request.Request(
+        "https://gen.pollinations.ai/v1/chat/completions",
+        data=__import__("json").dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Quantum-Queen-AI/1.0",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        result = __import__("json").loads(response.read(4 * 1024 * 1024).decode("utf-8"))
+    choices = result.get("choices") or []
+    if not choices:
+        raise RuntimeError("Pollinations vision returned no choices.")
+    content = choices[0].get("message", {}).get("content", "")
+    if isinstance(content, list):
+        content = "\n".join(
+            str(item.get("text", "")) for item in content if isinstance(item, dict)
+        )
+    answer = str(content).strip()
+    if not answer:
+        raise RuntimeError("Pollinations vision returned an empty answer.")
+    return answer, payload["model"]
+
+
 def understand_image(
     question: str,
     image_data: str | None,
@@ -398,7 +443,20 @@ def understand_image(
                 except Exception as exc:
                     errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:250]}")
 
-        raise RuntimeError(" | ".join(errors[-4:]) or "All vision attempts failed.")
+        hf_error = " | ".join(errors[-4:]) or "All vision attempts failed."
+        try:
+            answer, used_model = _pollinations_understand_image(image_url, question)
+            return {
+                "status": "completed",
+                "model": used_model,
+                "provider": "Pollinations",
+                "answer": answer,
+            }
+        except Exception as pollinations_exc:
+            raise RuntimeError(
+                f"Hugging Face vision failed: {hf_error} | "
+                f"Pollinations vision failed: {type(pollinations_exc).__name__}: {pollinations_exc}"
+            ) from pollinations_exc
     except Exception as exc:
         return {
             "status": "error",
