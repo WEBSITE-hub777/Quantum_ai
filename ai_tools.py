@@ -712,9 +712,9 @@ def _pollinations_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -
         raise RuntimeError("Pollinations edit response did not contain image data.")
     except (UnicodeDecodeError, ValueError):
         # Some compatible providers may return the image bytes directly.
-        if result.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        if result.startswith(b"\x89PNG\r\n\x1a\n"):
             return f"data:image/png;base64,{base64.b64encode(result).decode('ascii')}", "Pollinations/kontext"
-        if result.startswith(b"\\xff\\xd8\\xff"):
+        if result.startswith(b"\xff\xd8\xff"):
             return f"data:image/jpeg;base64,{base64.b64encode(result).decode('ascii')}", "Pollinations/kontext"
         raise RuntimeError("Pollinations returned an unrecognized edit response.")
 
