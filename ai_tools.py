@@ -645,6 +645,80 @@ def _hf_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> tuple[st
     )
 
 
+
+def _pollinations_edit_image(image_bytes: bytes, prompt: str, image_mime: str) -> tuple[str, str]:
+    """Edit an uploaded image through Pollinations' OpenAI-compatible edits endpoint."""
+    api_key = os.getenv("Quantum1", "").strip()
+    if not api_key:
+        raise RuntimeError("Pollinations image API key is not configured.")
+
+    boundary = "----QuantumQueenImageEditBoundary7MA4YWxk"
+    safe_mime = _allowed_image_mime(image_mime)
+    filename = "upload." + {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(safe_mime, "jpg")
+
+    def field(name: str, value: str) -> bytes:
+        return (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n"
+        ).encode("utf-8")
+
+    body = b"".join([
+        field("prompt", prompt),
+        field("model", os.getenv("POLLINATIONS_EDIT_MODEL", "kontext").strip() or "kontext"),
+        field("size", "1024x1024"),
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'
+            f"Content-Type: {safe_mime}\r\n\r\n"
+        ).encode("utf-8"),
+        image_bytes,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode("utf-8"),
+    ])
+
+    request = urllib.request.Request(
+        "https://gen.pollinations.ai/v1/images/edits",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "Quantum-Queen-AI/1.0",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        result = response.read(MAX_IMAGE_BYTES * 2 + 1024 * 1024)
+
+    try:
+        payload = __import__("json").loads(result.decode("utf-8"))
+        item = (payload.get("data") or [{}])[0]
+        encoded = item.get("b64_json")
+        if encoded:
+            return f"data:image/png;base64,{encoded}", "Pollinations/kontext"
+        image_url = item.get("url")
+        if image_url:
+            if not image_url.startswith("https://"):
+                raise RuntimeError("Pollinations returned a non-HTTPS image URL.")
+            req = urllib.request.Request(image_url, headers={"User-Agent": "Quantum-Queen-AI/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as response:
+                edited_bytes = response.read(MAX_IMAGE_BYTES + 1)
+                content_type = response.headers.get("Content-Type", "image/png").split(";", 1)[0].lower()
+            if len(edited_bytes) > MAX_IMAGE_BYTES:
+                raise RuntimeError("Edited image is larger than the 20 MB limit.")
+            if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+                content_type = "image/png"
+            return f"data:{content_type};base64,{base64.b64encode(edited_bytes).decode('ascii')}", "Pollinations/kontext"
+        raise RuntimeError("Pollinations edit response did not contain image data.")
+    except (UnicodeDecodeError, ValueError):
+        # Some compatible providers may return the image bytes directly.
+        if result.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            return f"data:image/png;base64,{base64.b64encode(result).decode('ascii')}", "Pollinations/kontext"
+        if result.startswith(b"\\xff\\xd8\\xff"):
+            return f"data:image/jpeg;base64,{base64.b64encode(result).decode('ascii')}", "Pollinations/kontext"
+        raise RuntimeError("Pollinations returned an unrecognized edit response.")
+
+
 def edit_image(
     prompt: str,
     image_data: str | None,
@@ -667,7 +741,18 @@ def edit_image(
     try:
         mime = _allowed_image_mime(image_mime)
         image_bytes = _image_data_to_bytes(image_data, mime)
-        data_url, used_model = _hf_edit_image(image_bytes, prompt, mime)
+        try:
+            data_url, used_model = _hf_edit_image(image_bytes, prompt, mime)
+            provider = "Hugging Face"
+        except Exception as hf_exc:
+            try:
+                data_url, used_model = _pollinations_edit_image(image_bytes, prompt, mime)
+                provider = "Pollinations"
+            except Exception as pollinations_exc:
+                raise RuntimeError(
+                    f"Hugging Face edit failed: {type(hf_exc).__name__}: {hf_exc} | "
+                    f"Pollinations edit failed: {type(pollinations_exc).__name__}: {pollinations_exc}"
+                ) from pollinations_exc
 
         if not isinstance(data_url, str) or not data_url.startswith("data:image/"):
             return {
@@ -679,7 +764,7 @@ def edit_image(
         return {
             "status": "completed",
             "model": used_model,
-            "provider": "Hugging Face",
+            "provider": provider,
             "mime": "image/png",
             "data": data_url,
             "answer": "",
