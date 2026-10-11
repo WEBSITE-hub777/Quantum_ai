@@ -464,6 +464,20 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         safe_url = _valid_browser_url(raw_url)
         if safe_url:
             return {"title": safe_url, "url": safe_url}
+
+    # Also accept a bare domain with a path, e.g. "open example.com/page".
+    # Require a navigation phrase so ordinary chat is not mistaken for a URL.
+    if any(signal in text for signal in navigation_signals):
+        bare_domain = re.search(
+            r"(?<![@\w.-])((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})(/[^\s<>()]*)?",
+            message,
+            flags=re.IGNORECASE,
+        )
+        if bare_domain:
+            candidate = "https://" + bare_domain.group(1) + (bare_domain.group(2) or "")
+            safe_url = _valid_browser_url(candidate.rstrip(".,!?;"))
+            if safe_url:
+                return {"title": safe_url, "url": safe_url}
     for key, (title, url) in BROWSER_SITE_MAP.items():
         if key in text and any(signal in text for signal in navigation_signals):
             return {"title": title, "url": url}
