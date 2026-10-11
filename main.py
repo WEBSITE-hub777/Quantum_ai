@@ -12,8 +12,8 @@ from quantum import quantum_status, run_quantum
 from queen import queen_status
 from router import process_request
 
-APP_NAME = "Quantum Queen AI"
-APP_VERSION = "4.0.0"
+APP_NAME = "Browser Queen AI"
+APP_VERSION = "5.0.0"
 MAX_MESSAGE_LENGTH = 20000
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
 
@@ -54,6 +54,7 @@ async def root():
             "vision": True,
             "image_generation": True,
             "image_editing": True,
+            "browser_navigation": True,
         },
     }
 
