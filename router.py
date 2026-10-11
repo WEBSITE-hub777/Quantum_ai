@@ -507,8 +507,17 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
                     "url": "https://www.google.com/search?q=" + query,
                 }
 
-    for key, (title, url) in BROWSER_SITE_MAP.items():
-        if key in text and any(signal in text for signal in navigation_signals):
+    matching_sites = sorted(
+        ((key, value) for key, value in BROWSER_SITE_MAP.items() if key in text),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    if any(signal in text for signal in navigation_signals):
+        for key, (title, url) in matching_sites:
+            if wants_specific_page:
+                host = urllib.parse.urlsplit(url).hostname or ""
+                query = urllib.parse.quote(f"site:{host} {message}")
+                return {"title": f"{title} — page search", "url": "https://www.google.com/search?q=" + query}
             return {"title": title, "url": url}
     generic_site_signals = (
         "open ", "visit ", "go to ", "show ", "take me to ", "navigate to ", "browse to ", "open the ", "website", "web page",
