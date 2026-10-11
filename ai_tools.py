@@ -299,11 +299,27 @@ def understand_image(question: str, image_data: str | None, image_mime: str | No
         answer, model = _groq_vision(question, image_bytes, mime)
         return {"status": "completed", "provider": "Groq", "model": model, "answer": answer}
     except Exception as groq_exc:
+        # Image recognition fallback is Google Gemini (not the text router and
+        # not Hugging Face). Keep image generation/editing on its own pipeline.
         try:
-            answer, model = _hf_vision(question, image_bytes, mime)
-            return {"status": "completed", "provider": "Hugging Face", "model": model, "answer": answer}
-        except Exception as hf_exc:
-            return {"status": "error", "answer": "Image analysis failed.", "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Hugging Face: {type(hf_exc).__name__}: {hf_exc}"}
+            payload = {
+                "contents": [{
+                    "role": "user",
+                    "parts": _gemini_content_parts(question, image_bytes, mime),
+                }],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
+            }
+            response, model = _gemini_generate(payload, GEMINI_TEXT_MODEL)
+            answer = _parts_text(response)
+            if not answer:
+                raise RuntimeError("Gemini vision returned an empty response.")
+            return {"status": "completed", "provider": "Google Gemini", "model": model, "answer": answer}
+        except Exception as gemini_exc:
+            return {
+                "status": "error",
+                "answer": "Image analysis failed.",
+                "error": f"Groq vision failed: {type(groq_exc).__name__}: {groq_exc} | Google Gemini vision failed: {type(gemini_exc).__name__}: {gemini_exc}",
+            }
 
 def _prepare_generation_prompt(prompt: str) -> str:
     text = re.sub(r"\s+", " ", prompt.strip())
