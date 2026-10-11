@@ -18,7 +18,20 @@ GROQ_API_KEYS = list(dict.fromkeys(
     for key in os.getenv(name, "").split(",")
     if key.strip()
 ))
-DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip() or "openai/gpt-oss-120b"
+_configured_groq_model = os.getenv("GROQ_MODEL", "").strip()
+_DEPRECATED_GROQ_MODELS = {
+    "deepseek-r1-distill-llama-70b",
+    "deepseek-r1-distill-qwen-32b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "qwen/qwen3.6-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+}
+DEFAULT_GROQ_MODEL = (
+    "openai/gpt-oss-120b"
+    if not _configured_groq_model or _configured_groq_model.lower() in _DEPRECATED_GROQ_MODELS
+    else _configured_groq_model
+)
 GEMINI_KEY_NAMES = ("Gemini_1", "Gemini_2", "Gemini_3")
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash").strip()
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
