@@ -1,4 +1,5 @@
 import re
+import urllib.parse
 from enum import Enum
 from typing import Any
 
@@ -527,6 +528,15 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
             candidate_url = _valid_browser_url("https://" + candidate)
             if candidate_url:
                 return {"title": cleaned[:120], "url": candidate_url}
+
+        # If the requested site is unfamiliar and the text model could not
+        # resolve its official URL, still open a useful results page instead
+        # of silently falling back to normal chat.
+        query = urllib.parse.quote(cleaned + " official website")
+        return {
+            "title": f"Search: {cleaned[:100]}",
+            "url": "https://www.google.com/search?q=" + query,
+        }
     return None
 
 
