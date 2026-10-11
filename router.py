@@ -403,8 +403,26 @@ BROWSER_SITE_MAP = {
     "reddit": ("Reddit", "https://www.reddit.com/"),
     "linkedin": ("LinkedIn", "https://www.linkedin.com/"),
     "canva": ("Canva", "https://www.canva.com/"),
+    "netflix": ("Netflix", "https://www.netflix.com/"),
+    "spotify": ("Spotify", "https://open.spotify.com/"),
+    "myntra": ("Myntra", "https://www.myntra.com/"),
+    "meesho": ("Meesho", "https://www.meesho.com/"),
+    "jio cinema": ("JioHotstar", "https://www.jiohotstar.com/"),
+    "jiohotstar": ("JioHotstar", "https://www.jiohotstar.com/"),
+    "hotstar": ("JioHotstar", "https://www.jiohotstar.com/"),
+    "telegram": ("Telegram Web", "https://web.telegram.org/"),
+    "pinterest": ("Pinterest", "https://www.pinterest.com/"),
+    "stackoverflow": ("Stack Overflow", "https://stackoverflow.com/"),
+    "stack overflow": ("Stack Overflow", "https://stackoverflow.com/"),
+    "vercel": ("Vercel", "https://vercel.com/"),
+    "render": ("Render", "https://render.com/"),
+    "cloudflare": ("Cloudflare", "https://www.cloudflare.com/"),
+    "openai": ("OpenAI", "https://openai.com/"),
+    "perplexity": ("Perplexity", "https://www.perplexity.ai/"),
+    "hugging face": ("Hugging Face", "https://huggingface.co/"),
+    "huggingface": ("Hugging Face", "https://huggingface.co/"),
+    "pollinations": ("Pollinations", "https://pollinations.ai/"),
     "instagram reels": ("Instagram Reels", "https://www.instagram.com/reels/"),
-    "irctc": ("IRCTC train booking", "https://www.irctc.co.in/nget/train-search"),
 }
 
 
@@ -458,8 +476,8 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
     if not any(signal in text for signal in generic_site_signals):
         return None
 
-    # For an unfamiliar website, ask the primary chat provider to identify its
-    # official public homepage, then validate the URL before showing it.
+    # For unfamiliar sites, ask the text assistant for an official URL first.
+    # This uses the normal Groq -> Gemini text fallback only; it never calls image APIs.
     try:
         answer = ask_queen(
             "Return only JSON with keys title and url. Identify the official public website/page the user requested. "
@@ -475,6 +493,26 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
                 return {"title": str(data.get("title") or safe_url)[:120], "url": safe_url}
     except Exception:
         pass
+
+    # Deterministic fallback for common requests like "open example.com" or
+    # "open Example website" when the text provider is temporarily unavailable.
+    cleaned = text
+    for phrase in (
+        "please", "can you", "could you", "open the website", "open website",
+        "open the page", "open page", "open", "visit", "go to", "show me",
+        "show", "take me to", "navigate to", "browse to", "website", "web page",
+        "webpage", "page kholo", "website kholo", "page dikhao", "kholo",
+        "khol do", "open karo", "site par", "page par", "वेबसाइट खोल",
+        "पेज खोल", "पेज दिखा", "खोल दो", "खोलो", "वेबसाइट पर", "पेज पर",
+    ):
+        cleaned = cleaned.replace(phrase, " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,!?:;")
+    if cleaned:
+        candidate = cleaned.replace(" ", "")
+        if "." in candidate and "/" not in candidate:
+            candidate_url = _valid_browser_url("https://" + candidate)
+            if candidate_url:
+                return {"title": cleaned[:120], "url": candidate_url}
     return None
 
 
