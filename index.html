@@ -97,8 +97,8 @@ input:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22
     <div class="logo"><div class="crown">👑</div><div><h1 class="gradient">Browser Queen AI</h1><p class="sub">Your intelligent AI workspace</p></div></div>
     <label for="name">Your name</label><input id="name" autocomplete="name" placeholder="Enter your name">
     <label for="email">Email ID</label><input id="email" type="email" autocomplete="email" placeholder="you@example.com">
-    <button class="primary" id="loginBtn">Enter Quantum Queen →</button>
-    <div class="small">Developed by Mrityunjay's · Powered by your Quantum Queen backend</div>
+    <button class="primary" id="loginBtn">Enter Browser Queen AI →</button>
+    <div class="small">Developed by Mrityunjay's · Powered by your Browser Queen AI backend</div>
   </div>
 </section>
 
@@ -189,7 +189,7 @@ $("loginBtn").onclick=()=>{
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return alert("Please enter a valid email ID.");
   user={name,email}; localStorage.setItem("qq_user",JSON.stringify(user)); showApp();
 };
-$("newChat").onclick=()=>{history=[];clearSelectedImage();$("chat").innerHTML=`<div id="welcome" class="welcome"><h2><span class="gradient">New chat</span></h2><p>Ask Quantum Queen anything.</p></div>`};
+$("newChat").onclick=()=>{history=[];clearSelectedImage();$("chat").innerHTML=`<div id="welcome" class="welcome"><h2><span class="gradient">New chat</span></h2><p>Ask Browser Queen AI anything.</p></div>`};
 $("attachBtn").onclick=()=>$("fileInput").click();
 
 function clearSelectedImage(){
@@ -581,7 +581,7 @@ async function send(){
   }
 }
 
-window.addEventListener("error",e=>{console.error("Quantum Queen frontend error:",e.error||e.message);});
+window.addEventListener("error",e=>{console.error("Browser Queen AI frontend error:",e.error||e.message);});
 </script>
 
 </body>
