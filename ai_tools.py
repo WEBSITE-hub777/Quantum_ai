@@ -433,6 +433,11 @@ def _try_groq_image_operation(operation: str) -> None:
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
+    """Generate images with the original image pipeline, independent of chat fallback.
+    
+    Image generation uses Hugging Face first, then Pollinations. Gemini is reserved
+    for text chat fallback; a Gemini text/API quota must not break image generation.
+    """
     prompt = _prepare_generation_prompt(prompt)
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
@@ -440,15 +445,27 @@ def generate_image(prompt: str) -> dict[str, Any]:
     if HF_TOKENS:
         try:
             data_url, model = _hf_generate_image(prompt)
-            return {"status": "completed", "provider": "Hugging Face", "model": model, "mime": "image/png", "data": data_url, "answer": f"Image generated successfully with {model}."}
+            return {
+                "status": "completed", "provider": "Hugging Face", "model": model,
+                "mime": "image/png", "data": data_url,
+                "answer": f"Image generated successfully with {model}.",
+            }
         except Exception as exc:
             errors.append(f"Hugging Face: {type(exc).__name__}: {str(exc)[:250]}")
     try:
         data_url, mime, model = _pollinations_generate_image(prompt)
-        return {"status": "completed", "provider": "Pollinations", "model": model, "mime": mime, "data": data_url, "answer": f"Image generated successfully with {model}."}
+        return {
+            "status": "completed", "provider": "Pollinations", "model": model,
+            "mime": mime, "data": data_url,
+            "answer": f"Image generated successfully with {model}.",
+        }
     except Exception as exc:
         errors.append(f"Pollinations: {type(exc).__name__}: {str(exc)[:250]}")
-    return {"status": "error", "answer": "Image generation failed.", "error": " | ".join(errors)}
+    return {
+        "status": "error",
+        "answer": "Image generation failed. Check that Hugging Face tokens or the Quantum1 Pollinations key are configured and have quota.",
+        "error": " | ".join(errors),
+    }
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
