@@ -379,6 +379,89 @@ def classify_request(
         return Intent.NORMAL
 
 
+
+BROWSER_SITE_MAP = {
+    "irctc": ("IRCTC train booking", "https://www.irctc.co.in/nget/train-search"),
+    "indian railways": ("Indian Railways", "https://www.irctc.co.in/nget/train-search"),
+    "railway ticket": ("IRCTC train booking", "https://www.irctc.co.in/nget/train-search"),
+    "google": ("Google", "https://www.google.com/"),
+    "youtube": ("YouTube", "https://www.youtube.com/"),
+    "wikipedia": ("Wikipedia", "https://www.wikipedia.org/"),
+    "github": ("GitHub", "https://github.com/"),
+    "gmail": ("Gmail", "https://mail.google.com/"),
+    "google maps": ("Google Maps", "https://maps.google.com/"),
+    "maps": ("Google Maps", "https://maps.google.com/"),
+    "amazon": ("Amazon India", "https://www.amazon.in/"),
+    "flipkart": ("Flipkart", "https://www.flipkart.com/"),
+    "booking.com": ("Booking.com", "https://www.booking.com/"),
+    "chatgpt": ("ChatGPT", "https://chatgpt.com/"),
+}
+
+
+def _valid_browser_url(value: str) -> str | None:
+    import ipaddress
+    from urllib.parse import urlsplit, urlunsplit
+    try:
+        parsed = urlsplit(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        host = parsed.hostname.lower().rstrip(".")
+        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+            return None
+        try:
+            address = ipaddress.ip_address(host)
+            if not address.is_global:
+                return None
+        except ValueError:
+            pass
+        if not re.fullmatch(r"[a-zA-Z0-9.-]+", host):
+            return None
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.query, parsed.fragment))
+    except Exception:
+        return None
+
+
+def resolve_browser_target(message: str) -> dict[str, str] | None:
+    text = normalize(message)
+    navigation_signals = (
+        "open ", "visit ", "go to ", "show me ", "take me to ", "website",
+        "web page", "webpage", "page kholo", "website kholo", "page dikhao",
+        "kholo", "khol do", "open karo", "site par", "page par", "ticket book",
+        "ticket booking", "टिकट बुक", "वेबसाइट खोल", "पेज खोल", "पेज दिखा",
+        "खोल दो", "खोलो", "वेबसाइट पर", "पेज पर",
+    )
+    explicit_url = re.search(r"https?://[^\s<>()]+", message, flags=re.IGNORECASE)
+    if explicit_url:
+        raw_url = explicit_url.group(0).rstrip(".,!?;")
+        safe_url = _valid_browser_url(raw_url)
+        if safe_url:
+            return {"title": safe_url, "url": safe_url}
+    for key, (title, url) in BROWSER_SITE_MAP.items():
+        if key in text and (any(signal in text for signal in navigation_signals) or key in {"irctc", "indian railways", "railway ticket"}):
+            return {"title": title, "url": url}
+    if not any(signal in text for signal in navigation_signals):
+        return None
+
+    # For an unfamiliar website, ask the primary chat provider to identify its
+    # official public homepage, then validate the URL before showing it.
+    try:
+        answer = ask_queen(
+            "Return only JSON with keys title and url. Identify the official public website/page the user requested. "
+            "Do not perform any action or claim a booking. If uncertain, use the official homepage. "
+            "Use an absolute HTTPS URL.\nUser request: " + message,
+            system_context="You only resolve website navigation targets. Return JSON only."
+        )
+        match = re.search(r"\{[\s\S]*\}", answer)
+        if match:
+            data = __import__("json").loads(match.group(0))
+            safe_url = _valid_browser_url(str(data.get("url", "")))
+            if safe_url:
+                return {"title": str(data.get("title") or safe_url)[:120], "url": safe_url}
+    except Exception:
+        pass
+    return None
+
+
 def process_request(
     user_message: str,
     history: list[dict[str, Any]] | None = None,
@@ -387,6 +470,15 @@ def process_request(
     image_url: str | None = None,
 ) -> dict[str, Any]:
     message = user_message.strip()
+
+    browser_target = resolve_browser_target(message)
+    if browser_target:
+        return {
+            "type": "browser_navigation",
+            "status": "completed",
+            "answer": f"I found the requested page: {browser_target['title']}. You can continue on the page yourself. I will not submit bookings or payments.",
+            "browser": browser_target,
+        }
 
     # Some frontends upload the image first and send its public URL rather
     # than a base64 payload. Treat that URL as the actual image input.
