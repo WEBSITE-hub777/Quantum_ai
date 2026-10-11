@@ -437,7 +437,7 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         if safe_url:
             return {"title": safe_url, "url": safe_url}
     for key, (title, url) in BROWSER_SITE_MAP.items():
-        if key in text and (any(signal in text for signal in navigation_signals) or key in {"irctc", "indian railways", "railway ticket"}):
+        if key in text and any(signal in text for signal in navigation_signals):
             return {"title": title, "url": url}
     if not any(signal in text for signal in navigation_signals):
         return None
