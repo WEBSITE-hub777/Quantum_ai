@@ -420,9 +420,6 @@ BROWSER_SITE_MAP = {
     "cloudflare": ("Cloudflare", "https://www.cloudflare.com/"),
     "openai": ("OpenAI", "https://openai.com/"),
     "perplexity": ("Perplexity", "https://www.perplexity.ai/"),
-    "hugging face": ("Hugging Face", "https://huggingface.co/"),
-    "huggingface": ("Hugging Face", "https://huggingface.co/"),
-    "pollinations": ("Pollinations", "https://pollinations.ai/"),
     "instagram reels": ("Instagram Reels", "https://www.instagram.com/reels/"),
 }
 
@@ -522,7 +519,21 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
             data = __import__("json").loads(match.group(0))
             safe_url = _valid_browser_url(str(data.get("url", "")))
             if safe_url:
-                return {"title": str(data.get("title") or safe_url)[:120], "url": safe_url}
+                # For a requested sub-page on a recognized site, reject an
+                # unrelated host returned by the language model. Fall through
+                # to a site-scoped search rather than opening the wrong website.
+                requested_site = next(
+                    ((key, value) for key, value in BROWSER_SITE_MAP.items()
+                     if key in text and any(signal in text for signal in navigation_signals)),
+                    None,
+                )
+                if wants_specific_page and requested_site:
+                    expected_host = urllib.parse.urlparse(requested_site[1][1]).hostname or ""
+                    actual_host = urllib.parse.urlparse(safe_url).hostname or ""
+                    if not (actual_host == expected_host or actual_host.endswith("." + expected_host)):
+                        safe_url = None
+                if safe_url:
+                    return {"title": str(data.get("title") or safe_url)[:120], "url": safe_url}
     except Exception:
         pass
 
