@@ -26,7 +26,6 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _ALLOWED_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 GEMINI_KEY_NAMES = ("Gemini_1", "Gemini_2", "Gemini_3")
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash").strip()
-GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image").strip()
 GROQ_VISION_MODEL = os.getenv(
     "GROQ_VISION_MODEL", "qwen/qwen3.8-27b"
 ).strip()
@@ -75,74 +74,6 @@ def _extract_gemini_image(response: dict[str, Any]) -> tuple[str, str]:
             base64.b64decode(encoded, validate=True)
             return f"data:{mime};base64,{encoded}", mime
     raise RuntimeError("Gemini did not return image data.")
-
-
-def _gemini_image_interaction(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str]:
-    """Call Gemini's image-capable Interactions API and return a browser-ready data URL."""
-    keys = _gemini_keys()
-    if not keys:
-        raise RuntimeError("Gemini_1, Gemini_2 and Gemini_3 are not configured in Render.")
-
-    inputs: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-    if image_bytes is not None:
-        inputs.append({
-            "type": "image",
-            "mime_type": image_mime,
-            "data": base64.b64encode(image_bytes).decode("ascii"),
-        })
-    payload = {"model": GEMINI_IMAGE_MODEL, "input": inputs}
-    body = json.dumps(payload).encode("utf-8")
-    errors: list[str] = []
-
-    for index, key in enumerate(keys, 1):
-        request = urllib.request.Request(
-            "https://generativelanguage.googleapis.com/v1beta/interactions",
-            data=body,
-            headers={"Content-Type": "application/json", "x-goog-api-key": key},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                result = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
-
-            image_parts: list[dict[str, Any]] = []
-            for item in result.get("output", []) if isinstance(result.get("output"), list) else []:
-                if isinstance(item, dict) and item.get("type") == "image":
-                    image_parts.append(item)
-            for step in result.get("steps", []) if isinstance(result.get("steps"), list) else []:
-                if not isinstance(step, dict):
-                    continue
-                for item in step.get("content", []) if isinstance(step.get("content"), list) else []:
-                    if isinstance(item, dict) and item.get("type") == "image":
-                        image_parts.append(item)
-
-            direct = result.get("output_image")
-            if isinstance(direct, dict):
-                image_parts.append({
-                    "data": direct.get("data"),
-                    "mime_type": direct.get("mime_type") or direct.get("mimeType"),
-                    "type": "image",
-                })
-
-            for part in image_parts:
-                encoded = part.get("data") or part.get("b64_json")
-                if not encoded:
-                    continue
-                # Some wrappers may already return a data URL.
-                if isinstance(encoded, str) and encoded.startswith("data:image/"):
-                    header, encoded = encoded.split(",", 1)
-                    mime_match = re.match(r"data:(image/[a-zA-Z0-9.+-]+);base64", header)
-                    output_mime = mime_match.group(1) if mime_match else "image/png"
-                else:
-                    output_mime = part.get("mime_type") or part.get("mimeType") or "image/png"
-                base64.b64decode(encoded, validate=True)
-                return f"data:{output_mime};base64,{encoded}", output_mime, GEMINI_IMAGE_MODEL
-
-            detail = result.get("error") or result.get("status") or "no image output returned"
-            raise RuntimeError(f"Gemini image API {detail}")
-        except Exception as exc:
-            errors.append(f"Gemini key {index}: {type(exc).__name__}: {str(exc)[:220]}")
-    raise RuntimeError("All Gemini image attempts failed: " + " | ".join(errors[-3:]))
 
 
 def _hf_image_clients() -> list[InferenceClient]:
@@ -422,14 +353,6 @@ def _prepare_generation_prompt(prompt: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     return text or prompt
-
-
-def _try_groq_image_operation(operation: str) -> None:
-    # Groq's documented API supports text and vision, not image output generation/editing.
-    # Do not fake an image call: raise a clear capability error so Gemini can handle it.
-    raise RuntimeError(
-        f"Groq has no image-{operation.split('-')[-1]} endpoint configured; handing off to Gemini."
-    )
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
