@@ -375,7 +375,53 @@ def understand_image(question: str, image_data: str | None, image_mime: str | No
             return {"status": "error", "answer": "Image analysis failed.", "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Hugging Face: {type(hf_exc).__name__}: {hf_exc}"}
 
 def _prepare_generation_prompt(prompt: str) -> str:
-    return re.sub(r"\s+", " ", prompt.strip())
+    text = re.sub(r"\s+", " ", prompt.strip())
+    replacements = (
+        ("एक इमेज बनाओ", "create an image"),
+        ("एक इमेज बना दो", "create an image"),
+        ("इमेज बनाओ", "create an image"),
+        ("इमेज बना दो", "create an image"),
+        ("एक फोटो बनाओ", "create a photo"),
+        ("फोटो बनाओ", "create a photo"),
+        ("तस्वीर बनाओ", "create an image"),
+        ("चित्र बनाओ", "create an image"),
+        ("बनाओ", "create"),
+        ("बना दो", "create"),
+        ("बना", "create"),
+        ("बनवा दो", "create"),
+        ("तैयार करो", "create"),
+        ("एक", "a"),
+        ("और", "and"),
+        ("के साथ", "with"),
+        ("के ऊपर", "on top of"),
+        ("के नीचे", "under"),
+        ("पीछे", "behind"),
+        ("सामने", "in front of"),
+        ("बैकग्राउंड", "background"),
+        ("जंगल", "forest"),
+        ("आसमान", "sky"),
+        ("समुद्र", "ocean"),
+        ("पहाड़", "mountain"),
+        ("घर", "house"),
+        ("पेड़", "tree"),
+        ("फूल", "flower"),
+        ("सूरज", "sun"),
+        ("चाँद", "moon"),
+        ("लड़का", "boy"),
+        ("लड़की", "girl"),
+        ("बिल्ली", "cat"),
+        ("कुत्ता", "dog"),
+    )
+    for source, target in replacements:
+        text = text.replace(source, target)
+    text = re.sub(
+        r"^(generate|create|make|draw)\s+(an?\s+)?"
+        r"(image|picture|photo|illustration)?\s*(of|about)?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    return text or prompt
 
 
 def _try_groq_image_operation(operation: str) -> None:
