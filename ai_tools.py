@@ -324,7 +324,7 @@ def generate_image(prompt: str) -> dict[str, Any]:
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
-    return re.sub(r"\\s+", " ", prompt.strip())
+    return re.sub(r"\s+", " ", prompt.strip())
 
 
 def edit_image(prompt: str, image_data: str | None, image_mime: str | None = None) -> dict[str, Any]:
