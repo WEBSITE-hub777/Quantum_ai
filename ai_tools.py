@@ -433,7 +433,7 @@ def _try_groq_image_operation(operation: str) -> None:
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
-    prompt = re.sub(r"\s+", " ", prompt.strip())
+    prompt = _prepare_generation_prompt(prompt)
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
     errors = []
