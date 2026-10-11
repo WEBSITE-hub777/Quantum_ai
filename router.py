@@ -488,14 +488,28 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         "डाउनलोड पेज", "सपोर्ट पेज", "लॉगिन पेज", "हेल्प पेज", "ट्रेन सर्च",
     )
     wants_specific_page = any(signal in text for signal in detailed_page_signals)
-    if not wants_specific_page:
+    if wants_specific_page and any(term in text for term in ("irctc", "indian railways", "railway ticket", "train search", "ट्रेन सर्च")):
+        return {
+            "title": "IRCTC train search",
+            "url": "https://www.irctc.co.in/nget/train-search",
+        }
+
+    # Known-site subpage requests should not rely on a language model guessing
+    # a deep URL. Open a site-scoped search for the requested page instead.
+    # This also works for sites whose exact subpage URL changes frequently.
+    if wants_specific_page:
         for key, (title, url) in BROWSER_SITE_MAP.items():
             if key in text and any(signal in text for signal in navigation_signals):
-                return {"title": title, "url": url}
-    elif any(term in text for term in ("irctc", "indian railways", "railway ticket", "train search", "ट्रेन सर्च")):
-        for key, (title, url) in BROWSER_SITE_MAP.items():
-            if key in text and any(signal in text for signal in navigation_signals):
-                return {"title": title, "url": url}
+                host = urllib.parse.urlsplit(url).hostname or ""
+                query = urllib.parse.quote(f"site:{host} {message}")
+                return {
+                    "title": f"{title} — page search",
+                    "url": "https://www.google.com/search?q=" + query,
+                }
+
+    for key, (title, url) in BROWSER_SITE_MAP.items():
+        if key in text and any(signal in text for signal in navigation_signals):
+            return {"title": title, "url": url}
     generic_site_signals = (
         "open ", "visit ", "go to ", "show ", "take me to ", "navigate to ", "browse to ", "open the ", "website", "web page",
         "webpage", "page kholo", "website kholo", "page dikhao", "kholo",
