@@ -67,6 +67,74 @@ def _extract_gemini_image(response: dict[str, Any]) -> tuple[str, str]:
     raise RuntimeError("Gemini did not return image data.")
 
 
+def _gemini_image_interaction(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str]:
+    """Call Gemini's image-capable Interactions API and return a browser-ready data URL."""
+    keys = _gemini_keys()
+    if not keys:
+        raise RuntimeError("Gemini_1, Gemini_2 and Gemini_3 are not configured in Render.")
+
+    inputs: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    if image_bytes is not None:
+        inputs.append({
+            "type": "image",
+            "mime_type": image_mime,
+            "data": base64.b64encode(image_bytes).decode("ascii"),
+        })
+    payload = {"model": GEMINI_IMAGE_MODEL, "input": inputs}
+    body = json.dumps(payload).encode("utf-8")
+    errors: list[str] = []
+
+    for index, key in enumerate(keys, 1):
+        request = urllib.request.Request(
+            "https://generativelanguage.googleapis.com/v1beta/interactions",
+            data=body,
+            headers={"Content-Type": "application/json", "x-goog-api-key": key},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
+
+            image_parts: list[dict[str, Any]] = []
+            for item in result.get("output", []) if isinstance(result.get("output"), list) else []:
+                if isinstance(item, dict) and item.get("type") == "image":
+                    image_parts.append(item)
+            for step in result.get("steps", []) if isinstance(result.get("steps"), list) else []:
+                if not isinstance(step, dict):
+                    continue
+                for item in step.get("content", []) if isinstance(step.get("content"), list) else []:
+                    if isinstance(item, dict) and item.get("type") == "image":
+                        image_parts.append(item)
+
+            direct = result.get("output_image")
+            if isinstance(direct, dict):
+                image_parts.append({
+                    "data": direct.get("data"),
+                    "mime_type": direct.get("mime_type") or direct.get("mimeType"),
+                    "type": "image",
+                })
+
+            for part in image_parts:
+                encoded = part.get("data") or part.get("b64_json")
+                if not encoded:
+                    continue
+                # Some wrappers may already return a data URL.
+                if isinstance(encoded, str) and encoded.startswith("data:image/"):
+                    header, encoded = encoded.split(",", 1)
+                    mime_match = re.match(r"data:(image/[a-zA-Z0-9.+-]+);base64", header)
+                    output_mime = mime_match.group(1) if mime_match else "image/png"
+                else:
+                    output_mime = part.get("mime_type") or part.get("mimeType") or "image/png"
+                base64.b64decode(encoded, validate=True)
+                return f"data:{output_mime};base64,{encoded}", output_mime, GEMINI_IMAGE_MODEL
+
+            detail = result.get("error") or result.get("status") or "no image output returned"
+            raise RuntimeError(f"Gemini image API {detail}")
+        except Exception as exc:
+            errors.append(f"Gemini key {index}: {type(exc).__name__}: {str(exc)[:220]}")
+    raise RuntimeError("All Gemini image attempts failed: " + " | ".join(errors[-3:]))
+
+
 def safe_expression(expression: str) -> str:
     expression = expression.replace("^", "**").replace("×", "*").replace("÷", "/")
     return re.sub(r"[^0-9a-zA-Z_+\-*/().,\s*]", "", expression).strip()
@@ -227,9 +295,11 @@ def _prepare_generation_prompt(prompt: str) -> str:
 
 
 def _try_groq_image_operation(operation: str) -> None:
-    # Groq's chat API does not expose image-generation/editing output.
-    # Keep the primary-first routing explicit, then hand off to Gemini's image model.
-    raise RuntimeError(f"Groq currently has no supported public {operation} endpoint in this integration; use Gemini image fallback.")
+    # Groq's documented API supports text and vision, not image output generation/editing.
+    # Do not fake an image call: raise a clear capability error so Gemini can handle it.
+    raise RuntimeError(
+        f"Groq has no image-{operation.split('-')[-1]} endpoint configured; handing off to Gemini."
+    )
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
@@ -240,18 +310,21 @@ def generate_image(prompt: str) -> dict[str, Any]:
         _try_groq_image_operation("image-generation")
     except Exception as groq_exc:
         try:
-            response, model = _gemini_generate({
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-            }, GEMINI_IMAGE_MODEL)
-            data_url, mime = _extract_gemini_image(response)
-            return {"status": "completed", "provider": "Gemini", "model": model, "mime": mime, "data": data_url, "answer": "Image generated successfully with Gemini."}
+            data_url, mime, model = _gemini_image_interaction(prompt)
+            return {
+                "status": "completed", "provider": "Gemini", "model": model,
+                "mime": mime, "data": data_url,
+                "answer": "Image generated successfully with Gemini.",
+            }
         except Exception as gemini_exc:
-            return {"status": "error", "answer": "Image generation failed.", "error": f"Groq: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}"}
+            return {
+                "status": "error", "answer": "Image generation failed.",
+                "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}",
+            }
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
-    return re.sub(r"\s+", " ", prompt.strip())
+    return re.sub(r"\\s+", " ", prompt.strip())
 
 
 def edit_image(prompt: str, image_data: str | None, image_mime: str | None = None) -> dict[str, Any]:
@@ -268,11 +341,13 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
         _try_groq_image_operation("image-editing")
     except Exception as groq_exc:
         try:
-            response, model = _gemini_generate({
-                "contents": [{"role": "user", "parts": _gemini_content_parts(prompt, image_bytes, mime)}],
-                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-            }, GEMINI_IMAGE_MODEL)
-            data_url, output_mime = _extract_gemini_image(response)
-            return {"status": "completed", "provider": "Gemini", "model": model, "mime": output_mime, "data": data_url, "answer": ""}
+            data_url, output_mime, model = _gemini_image_interaction(prompt, image_bytes, mime)
+            return {
+                "status": "completed", "provider": "Gemini", "model": model,
+                "mime": output_mime, "data": data_url, "answer": "",
+            }
         except Exception as gemini_exc:
-            return {"status": "error", "answer": "Image editing failed.", "error": f"Groq: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}"}
+            return {
+                "status": "error", "answer": "Image editing failed.",
+                "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}",
+            }
