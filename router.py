@@ -479,9 +479,26 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
             safe_url = _valid_browser_url(candidate.rstrip(".,!?;"))
             if safe_url:
                 return {"title": safe_url, "url": safe_url}
-    for key, (title, url) in BROWSER_SITE_MAP.items():
-        if key in text and any(signal in text for signal in navigation_signals):
-            return {"title": title, "url": url}
+    # If the user asks for a specific sub-page, do not silently open only the
+    # site's homepage. Let the official-URL resolver try first, then fall back
+    # to a search page for the full request. Keep IRCTC train-search mapped
+    # directly because it is a common explicit destination.
+    detailed_page_signals = (
+        " login", " sign in", " pricing", " price page", " docs", " documentation",
+        " dashboard", " settings", " help page", " support page", " status page",
+        " download page", " careers", " contact page", " about page", " train search",
+        "pnr status", "लॉगिन", "साइन इन", "प्राइसिंग", "डैशबोर्ड", "सेटिंग",
+        "डाउनलोड पेज", "सपोर्ट पेज", "लॉगिन पेज", "हेल्प पेज", "ट्रेन सर्च",
+    )
+    wants_specific_page = any(signal in text for signal in detailed_page_signals)
+    if not wants_specific_page:
+        for key, (title, url) in BROWSER_SITE_MAP.items():
+            if key in text and any(signal in text for signal in navigation_signals):
+                return {"title": title, "url": url}
+    elif any(term in text for term in ("irctc", "indian railways", "railway ticket", "train search", "ट्रेन सर्च")):
+        for key, (title, url) in BROWSER_SITE_MAP.items():
+            if key in text and any(signal in text for signal in navigation_signals):
+                return {"title": title, "url": url}
     generic_site_signals = (
         "open ", "visit ", "go to ", "show ", "take me to ", "navigate to ", "browse to ", "open the ", "website", "web page",
         "webpage", "page kholo", "website kholo", "page dikhao", "kholo",
