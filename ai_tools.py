@@ -9,6 +9,16 @@ import urllib.request
 from typing import Any
 
 import sympy as sp
+from huggingface_hub import InferenceClient
+
+HF_VAR_NAMES = ("HF_TOKEN", "HF1_TOKEN", "HF2_TOKEN", "HF3_TOKEN", "HF4_TOKEN", "HF_TOKENS")
+HF_TOKENS = list(dict.fromkeys(token.strip() for name in HF_VAR_NAMES for token in os.getenv(name, "").split(",") if token.strip()))
+HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()
+HF_IMAGE_FALLBACK_MODEL = os.getenv("HF_IMAGE_FALLBACK_MODEL", "Qwen/Qwen-Image").strip()
+HF_IMAGE_EDIT_MODEL = os.getenv("HF_IMAGE_EDIT_MODEL", "Qwen/Qwen-Image-Edit").strip()
+HF_IMAGE_EDIT_FALLBACK_MODEL = os.getenv("HF_IMAGE_EDIT_FALLBACK_MODEL", "black-forest-labs/FLUX.1-Kontext-dev").strip()
+HF_VISION_MODEL = os.getenv("HF_VISION_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct").strip()
+HF_VISION_FALLBACK_MODEL = os.getenv("HF_VISION_FALLBACK_MODEL", "zai-org/GLM-4.5V").strip()
 
 MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
@@ -133,6 +143,87 @@ def _gemini_image_interaction(prompt: str, image_bytes: bytes | None = None, ima
         except Exception as exc:
             errors.append(f"Gemini key {index}: {type(exc).__name__}: {str(exc)[:220]}")
     raise RuntimeError("All Gemini image attempts failed: " + " | ".join(errors[-3:]))
+
+
+def _hf_image_clients() -> list[InferenceClient]:
+    if not HF_TOKENS:
+        raise RuntimeError("No HF tokens configured (set HF_TOKEN or HF1_TOKEN).")
+    return [InferenceClient(api_key=token, provider="auto", timeout=180) for token in HF_TOKENS]
+
+
+def _pil_to_data_url(image: Any) -> str:
+    if not hasattr(image, "save"):
+        raise RuntimeError("Hugging Face returned an invalid image object.")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _hf_generate_image(prompt: str) -> tuple[str, str]:
+    errors = []
+    for model_name in dict.fromkeys([HF_IMAGE_MODEL, HF_IMAGE_FALLBACK_MODEL]):
+        for client in _hf_image_clients():
+            try:
+                image = client.text_to_image(prompt=prompt, model=model_name)
+                return _pil_to_data_url(image), model_name
+            except Exception as exc:
+                errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:200]}")
+    raise RuntimeError("All Hugging Face image-generation attempts failed: " + " | ".join(errors[-4:]))
+
+
+def _pollinations_generate_image(prompt: str) -> tuple[str, str, str]:
+    api_key = os.getenv("Quantum1", "").strip()
+    if not api_key:
+        raise RuntimeError("Pollinations key Quantum1 is not configured in Render.")
+    model = os.getenv("POLLINATIONS_IMAGE_MODEL", "flux").strip() or "flux"
+    url = f"https://gen.pollinations.ai/image/{urllib.parse.quote(prompt, safe='')}?model={urllib.parse.quote(model, safe='/')}"
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}", "User-Agent": "Browser-Queen-AI/1.0"})
+    with urllib.request.urlopen(request, timeout=180) as response:
+        image_bytes = response.read(MAX_IMAGE_BYTES + 1)
+        mime = response.headers.get("Content-Type", "image/jpeg").split(";", 1)[0].lower()
+    if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
+        raise RuntimeError("Pollinations returned an empty image or an image over 20 MB.")
+    if mime not in {"image/jpeg", "image/png", "image/webp"}:
+        mime = "image/jpeg"
+    return f"data:{mime};base64," + base64.b64encode(image_bytes).decode("ascii"), mime, f"Pollinations/{model}"
+
+
+def _hf_edit_image(image_bytes: bytes, prompt: str) -> tuple[str, str]:
+    from PIL import Image
+    source = Image.open(io.BytesIO(image_bytes))
+    errors = []
+    for model_name in dict.fromkeys([HF_IMAGE_EDIT_MODEL, HF_IMAGE_EDIT_FALLBACK_MODEL]):
+        for client in _hf_image_clients():
+            try:
+                edited = client.image_to_image(image=source, prompt=prompt, model=model_name)
+                return _pil_to_data_url(edited), model_name
+            except Exception as exc:
+                errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:200]}")
+    raise RuntimeError("All Hugging Face image-edit attempts failed: " + " | ".join(errors[-4:]))
+
+
+def _hf_vision(question: str, image_bytes: bytes, image_mime: str) -> tuple[str, str]:
+    data_url = f"data:{image_mime};base64," + base64.b64encode(image_bytes).decode("ascii")
+    errors = []
+    for model_name in dict.fromkeys([HF_VISION_MODEL, HF_VISION_FALLBACK_MODEL]):
+        for client in _hf_image_clients():
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": question},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ]}],
+                    max_tokens=2048,
+                    temperature=0.2,
+                )
+                answer = (response.choices[0].message.content or "").strip() if response.choices else ""
+                if answer:
+                    return answer, model_name
+                errors.append(f"{model_name}: empty response")
+            except Exception as exc:
+                errors.append(f"{model_name}: {type(exc).__name__}: {str(exc)[:180]}")
+    raise RuntimeError("Hugging Face vision failed: " + " | ".join(errors[-4:]))
 
 
 def safe_expression(expression: str) -> str:
@@ -278,17 +369,10 @@ def understand_image(question: str, image_data: str | None, image_mime: str | No
         return {"status": "completed", "provider": "Groq", "model": model, "answer": answer}
     except Exception as groq_exc:
         try:
-            response, model = _gemini_generate({
-                "contents": [{"role": "user", "parts": _gemini_content_parts(question, image_bytes, mime)}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096},
-            }, GEMINI_TEXT_MODEL)
-            answer = _parts_text(response)
-            if not answer:
-                raise RuntimeError("Gemini vision returned an empty response.")
-            return {"status": "completed", "provider": "Gemini", "model": model, "answer": answer}
-        except Exception as gemini_exc:
-            return {"status": "error", "answer": "Image analysis failed.", "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}"}
-
+            answer, model = _hf_vision(question, image_bytes, mime)
+            return {"status": "completed", "provider": "Hugging Face", "model": model, "answer": answer}
+        except Exception as hf_exc:
+            return {"status": "error", "answer": "Image analysis failed.", "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Hugging Face: {type(hf_exc).__name__}: {hf_exc}"}
 
 def _prepare_generation_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt.strip())
@@ -303,24 +387,22 @@ def _try_groq_image_operation(operation: str) -> None:
 
 
 def generate_image(prompt: str) -> dict[str, Any]:
-    prompt = _prepare_generation_prompt(prompt)
+    prompt = re.sub(r"\s+", " ", prompt.strip())
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
-    try:
-        _try_groq_image_operation("image-generation")
-    except Exception as groq_exc:
+    errors = []
+    if HF_TOKENS:
         try:
-            data_url, mime, model = _gemini_image_interaction(prompt)
-            return {
-                "status": "completed", "provider": "Gemini", "model": model,
-                "mime": mime, "data": data_url,
-                "answer": "Image generated successfully with Gemini.",
-            }
-        except Exception as gemini_exc:
-            return {
-                "status": "error", "answer": "Image generation failed.",
-                "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}",
-            }
+            data_url, model = _hf_generate_image(prompt)
+            return {"status": "completed", "provider": "Hugging Face", "model": model, "mime": "image/png", "data": data_url, "answer": f"Image generated successfully with {model}."}
+        except Exception as exc:
+            errors.append(f"Hugging Face: {type(exc).__name__}: {str(exc)[:250]}")
+    try:
+        data_url, mime, model = _pollinations_generate_image(prompt)
+        return {"status": "completed", "provider": "Pollinations", "model": model, "mime": mime, "data": data_url, "answer": f"Image generated successfully with {model}."}
+    except Exception as exc:
+        errors.append(f"Pollinations: {type(exc).__name__}: {str(exc)[:250]}")
+    return {"status": "error", "answer": "Image generation failed.", "error": " | ".join(errors)}
 
 
 def _prepare_edit_prompt(prompt: str) -> str:
@@ -334,20 +416,9 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long edit prompt."}
     try:
-        image_bytes, mime = _image_data_to_bytes(image_data, image_mime)
+        image_bytes, _mime = _image_data_to_bytes(image_data, image_mime)
+        data_url, model = _hf_edit_image(image_bytes, prompt)
+        return {"status": "completed", "provider": "Hugging Face", "model": model, "mime": "image/png", "data": data_url, "answer": ""}
     except Exception as exc:
         return {"status": "error", "answer": "Image editing failed.", "error": f"{type(exc).__name__}: {exc}"}
-    try:
-        _try_groq_image_operation("image-editing")
-    except Exception as groq_exc:
-        try:
-            data_url, output_mime, model = _gemini_image_interaction(prompt, image_bytes, mime)
-            return {
-                "status": "completed", "provider": "Gemini", "model": model,
-                "mime": output_mime, "data": data_url, "answer": "",
-            }
-        except Exception as gemini_exc:
-            return {
-                "status": "error", "answer": "Image editing failed.",
-                "error": f"Groq: {type(groq_exc).__name__}: {groq_exc} | Gemini: {type(gemini_exc).__name__}: {gemini_exc}",
-            }
+
