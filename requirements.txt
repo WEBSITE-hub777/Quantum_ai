@@ -11,3 +11,4 @@ reportlab
 python-docx
 openpyxl
 python-pptx
+huggingface-hub
