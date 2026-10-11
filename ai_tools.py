@@ -281,7 +281,7 @@ def _prepare_generation_prompt(prompt: str) -> str:
 
 
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image").strip()
-GEMINI_IMAGE_FALLBACK_MODEL = os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-2.5-flash-image").strip()
+GEMINI_IMAGE_FALLBACK_MODEL = os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-3.1-flash-lite-image").strip()
 
 def _groq_image_prompt(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> str:
     """Use Groq to refine the image request; Groq does not return generated image pixels."""
@@ -315,53 +315,27 @@ def _groq_image_prompt(prompt: str, image_bytes: bytes | None = None, image_mime
     raise RuntimeError("Groq image-prompt step failed: " + " | ".join(errors[-3:]))
 
 def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str]:
-    """Generate or edit an image with Gemini's native image endpoint."""
-    keys = _gemini_keys()
-    if not keys:
-        raise RuntimeError("Gemini_1, Gemini_2 and Gemini_3 are not configured in Render.")
-    models = list(dict.fromkeys(model for model in (GEMINI_IMAGE_MODEL, GEMINI_IMAGE_FALLBACK_MODEL) if model))
-    input_items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-    if image_bytes is not None:
-        input_items.append({
-            "type": "image",
-            "mime_type": image_mime,
-            "data": base64.b64encode(image_bytes).decode("ascii"),
-        })
-    errors: list[str] = []
+    """Generate or edit pixels with the primary Gemini image model and a fallback model."""
+    parts = _gemini_content_parts(prompt, image_bytes, image_mime)
+    payload = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "temperature": 0.7,
+        },
+    }
+    models = list(dict.fromkeys(
+        model for model in (GEMINI_IMAGE_MODEL, GEMINI_IMAGE_FALLBACK_MODEL) if model
+    ))
+    errors = []
     for model in models:
-        body = json.dumps({
-            "model": model,
-            "input": input_items,
-            "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": "1:1"},
-        }).encode("utf-8")
-        for index, key in enumerate(keys, 1):
-            request = urllib.request.Request(
-                "https://generativelanguage.googleapis.com/v1beta/interactions",
-                data=body,
-                headers={"Content-Type": "application/json", "x-goog-api-key": key},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=180) as response:
-                    data = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
-                output_image = data.get("output_image") or {}
-                encoded = output_image.get("data")
-                if not encoded:
-                    for step in data.get("steps", []):
-                        for block in step.get("content", []) if isinstance(step, dict) else []:
-                            if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
-                                encoded, output_image = block["data"], block
-                                break
-                        if encoded:
-                            break
-                if not encoded:
-                    raise RuntimeError("Gemini returned no image data.")
-                base64.b64decode(encoded, validate=True)
-                mime = output_image.get("mime_type") or output_image.get("mimeType") or "image/png"
-                return f"data:{mime};base64,{encoded}", mime
-            except Exception as exc:
-                errors.append(f"{model}, key {index}: {type(exc).__name__}: {str(exc)[:180]}")
-    raise RuntimeError("All Gemini image attempts failed: " + " | ".join(errors[-6:]))
+        try:
+            response, _used_model = _gemini_generate(payload, model)
+            data_url, mime = _extract_gemini_image(response)
+            return data_url, mime
+        except Exception as exc:
+            errors.append(f"{model}: {type(exc).__name__}: {str(exc)[:220]}")
+    raise RuntimeError("All Gemini image models failed: " + " | ".join(errors))
 
 def _gemini_image_with_groq_first(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str]:
     """Groq-first prompt preparation followed by Gemini's actual image generation/editing."""
@@ -396,7 +370,7 @@ def generate_image(prompt: str) -> dict[str, Any]:
     except Exception as exc:
         return {
             "status": "error",
-            "answer": "Image generation failed. Groq can prepare image prompts but cannot return image pixels; Gemini image generation failed. Check the Gemini image-model quota in Google AI Studio/Cloud.",
+            "answer": "Image generation failed. Groq prepares the prompt; Gemini creates the actual image. Both configured Gemini image models failed. Check model access and quota in Google AI Studio.",
             "error": groq_error + f"Gemini: {type(exc).__name__}: {str(exc)[:500]}",
         }
 
@@ -428,7 +402,7 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
         }
     except Exception as exc:
         return {
-            "status": "error", "answer": "Image editing failed. Check Gemini image-model quota.",
+            "status": "error", "answer": "Image editing failed. Gemini image models could not return an edited image. Check model access and quota in Google AI Studio.",
             "error": groq_error + f"Gemini: {type(exc).__name__}: {str(exc)[:500]}",
         }
 
