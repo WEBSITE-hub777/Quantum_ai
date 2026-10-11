@@ -395,6 +395,16 @@ BROWSER_SITE_MAP = {
     "flipkart": ("Flipkart", "https://www.flipkart.com/"),
     "booking.com": ("Booking.com", "https://www.booking.com/"),
     "chatgpt": ("ChatGPT", "https://chatgpt.com/"),
+    "instagram": ("Instagram", "https://www.instagram.com/"),
+    "facebook": ("Facebook", "https://www.facebook.com/"),
+    "whatsapp": ("WhatsApp", "https://web.whatsapp.com/"),
+    "twitter": ("X", "https://x.com/"),
+    "x.com": ("X", "https://x.com/"),
+    "reddit": ("Reddit", "https://www.reddit.com/"),
+    "linkedin": ("LinkedIn", "https://www.linkedin.com/"),
+    "canva": ("Canva", "https://www.canva.com/"),
+    "instagram reels": ("Instagram Reels", "https://www.instagram.com/reels/"),
+    "irctc": ("IRCTC train booking", "https://www.irctc.co.in/nget/train-search"),
 }
 
 
@@ -424,7 +434,7 @@ def _valid_browser_url(value: str) -> str | None:
 def resolve_browser_target(message: str) -> dict[str, str] | None:
     text = normalize(message)
     navigation_signals = (
-        "open ", "visit ", "go to ", "show me ", "take me to ", "website",
+        "open ", "visit ", "go to ", "show ", "show me ", "take me to ", "navigate to ", "browse to ", "open the ", "website",
         "web page", "webpage", "page kholo", "website kholo", "page dikhao",
         "kholo", "khol do", "open karo", "site par", "page par", "ticket book",
         "ticket booking", "टिकट बुक", "वेबसाइट खोल", "पेज खोल", "पेज दिखा",
@@ -440,7 +450,7 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         if key in text and any(signal in text for signal in navigation_signals):
             return {"title": title, "url": url}
     generic_site_signals = (
-        "open ", "visit ", "go to ", "take me to ", "website", "web page",
+        "open ", "visit ", "go to ", "show ", "take me to ", "navigate to ", "browse to ", "open the ", "website", "web page",
         "webpage", "page kholo", "website kholo", "page dikhao", "kholo",
         "khol do", "open karo", "site par", "page par", "वेबसाइट खोल",
         "पेज खोल", "पेज दिखा", "खोल दो", "खोलो", "वेबसाइट पर", "पेज पर",
