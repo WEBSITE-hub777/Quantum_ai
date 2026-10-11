@@ -18,7 +18,7 @@ GEMINI_KEY_NAMES = ("Gemini_1", "Gemini_2", "Gemini_3")
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash").strip()
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image").strip()
 GROQ_VISION_MODEL = os.getenv(
-    "GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"
+    "GROQ_VISION_MODEL", "qwen/qwen3.8-27b"
 ).strip()
 
 
