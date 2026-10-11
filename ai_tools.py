@@ -10,15 +10,6 @@ from typing import Any
 
 import sympy as sp
 
-HF_VAR_NAMES = ("HF_TOKEN", "HF1_TOKEN", "HF2_TOKEN", "HF3_TOKEN", "HF4_TOKEN", "HF_TOKENS")
-HF_TOKENS = list(dict.fromkeys(token.strip() for name in HF_VAR_NAMES for token in os.getenv(name, "").split(",") if token.strip()))
-HF_IMAGE_MODEL = os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell").strip()
-HF_IMAGE_FALLBACK_MODEL = os.getenv("HF_IMAGE_FALLBACK_MODEL", "Qwen/Qwen-Image").strip()
-HF_IMAGE_EDIT_MODEL = os.getenv("HF_IMAGE_EDIT_MODEL", "Qwen/Qwen-Image-Edit").strip()
-HF_IMAGE_EDIT_FALLBACK_MODEL = os.getenv("HF_IMAGE_EDIT_FALLBACK_MODEL", "black-forest-labs/FLUX.1-Kontext-dev").strip()
-HF_VISION_MODEL = os.getenv("HF_VISION_MODEL", "Qwen/Qwen2.5-VL-3B-Instruct").strip()
-HF_VISION_FALLBACK_MODEL = os.getenv("HF_VISION_FALLBACK_MODEL", "zai-org/GLM-4.5V").strip()
-
 MAX_MATH_LENGTH = 12000
 MAX_IMAGE_PROMPT_LENGTH = 8000
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
