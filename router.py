@@ -439,7 +439,13 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
     for key, (title, url) in BROWSER_SITE_MAP.items():
         if key in text and any(signal in text for signal in navigation_signals):
             return {"title": title, "url": url}
-    if not any(signal in text for signal in navigation_signals):
+    generic_site_signals = (
+        "open ", "visit ", "go to ", "take me to ", "website", "web page",
+        "webpage", "page kholo", "website kholo", "page dikhao", "kholo",
+        "khol do", "open karo", "site par", "page par", "वेबसाइट खोल",
+        "पेज खोल", "पेज दिखा", "खोल दो", "खोलो", "वेबसाइट पर", "पेज पर",
+    )
+    if not any(signal in text for signal in generic_site_signals):
         return None
 
     # For an unfamiliar website, ask the primary chat provider to identify its
@@ -540,7 +546,7 @@ def process_request(
     capability_context = (
         "The application has integrated image capabilities. It can analyze uploaded images, "
         "generate new images, and edit existing images using specialized tools. "
-        "Do not claim that Quantum Queen AI lacks these capabilities. "
+        "Do not claim that Browser Queen AI lacks these capabilities. "
         "If the user is asking what the application can do, describe the application capabilities "
         "accurately rather than pretending the chat model itself must perform every capability."
         if contains_pattern(message, CAPABILITY_PATTERNS)
