@@ -1,7 +1,6 @@
 fastapi
 uvicorn[standard]
 pydantic
-huggingface_hub
 groq
 qiskit
 qiskit-aer
