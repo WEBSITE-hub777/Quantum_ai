@@ -284,7 +284,7 @@ function addMessage(role,text,imageData=null){
 
 
 function showBrowserPanel(browser){
-  if(!browser || !/^https?:\\/\\//i.test(browser.url||"")) return;
+  if(!browser || !/^https?:\/\//i.test(browser.url||"")) return;
   const safeUrl = String(browser.url);
   const row = document.createElement("div");
   row.className = "msg assistant";
@@ -561,9 +561,10 @@ async function send(){
     if(loading?.parentElement) loading.parentElement.remove();
 
     if(data.type === "browser_navigation" && data.browser && data.browser.url){
+      const browserAnswer = data.answer || "I found the requested website. You can continue there yourself.";
+      addMessage("assistant", browserAnswer);
       showBrowserPanel(data.browser);
-      addMessage("assistant", data.answer || "I opened the requested website panel. You can continue there yourself.");
-      history.push({role:"assistant", content:data.answer || "Opened requested website."});
+      history.push({role:"assistant", content:browserAnswer});
       return;
     }
 
