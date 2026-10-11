@@ -284,14 +284,52 @@ function addMessage(role,text,imageData=null){
 
 
 function showBrowserPanel(browser){
-  const panel=$("browserPanel"), frame=$("browserFrame"), title=$("browserTitle"), url=$("browserUrl"), external=$("openExternal");
-  if(!panel || !frame || !browser || !/^https?:\/\//i.test(browser.url||"")) return;
-  title.textContent=String(browser.title||"Website").slice(0,120);
-  url.textContent=browser.url;
-  external.href=browser.url;
-  frame.src=browser.url;
-  panel.classList.add("open");
-  $("browserNotice").textContent="This is the requested website. Some sites block embedded viewing; use “Open externally” if the page does not load. Browser Queen will not submit bookings or payments.";
+  if(!browser || !/^https?:\\/\\//i.test(browser.url||"")) return;
+  const safeUrl = String(browser.url);
+  const row = document.createElement("div");
+  row.className = "msg assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.style.width = "min(100%, 900px)";
+  bubble.style.maxWidth = "100%";
+
+  const card = document.createElement("section");
+  card.style.cssText = "margin-top:8px;border:1px solid #cfe0ef;border-radius:14px;overflow:hidden;background:#fff;color:#102338";
+  const head = document.createElement("div");
+  head.style.cssText = "display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;background:#f2f8ff;border-bottom:1px solid #dceafa";
+  const info = document.createElement("div");
+  info.style.cssText = "min-width:0;flex:1";
+  const title = document.createElement("strong");
+  title.textContent = String(browser.title || "Website").slice(0,120);
+  title.style.display = "block";
+  const url = document.createElement("div");
+  url.textContent = safeUrl;
+  url.style.cssText = "font-size:11px;color:#60758d;overflow-wrap:anywhere;margin-top:3px";
+  info.append(title,url);
+  const external = document.createElement("a");
+  external.href = safeUrl;
+  external.target = "_blank";
+  external.rel = "noopener noreferrer";
+  external.textContent = "Open externally ↗";
+  external.style.cssText = "font-size:12px;text-decoration:none;background:#087cf0;color:#fff;padding:8px 10px;border-radius:9px";
+  head.append(info,external);
+
+  const notice = document.createElement("div");
+  notice.textContent = "Page preview only. Some websites block embedded viewing; if it stays blank, use “Open externally”. Browser Queen will not submit forms, bookings, or payments.";
+  notice.style.cssText = "font-size:11px;line-height:1.45;color:#60758d;padding:8px 10px;background:#f8fbff";
+
+  const frame = document.createElement("iframe");
+  frame.title = String(browser.title || "Requested website");
+  frame.src = safeUrl;
+  frame.loading = "lazy";
+  frame.referrerPolicy = "no-referrer";
+  frame.setAttribute("sandbox","allow-forms allow-scripts allow-popups allow-popups-to-escape-sandbox");
+  frame.style.cssText = "display:block;border:0;width:100%;height:clamp(320px,55vh,680px);background:#fff";
+  card.append(head,notice,frame);
+  bubble.appendChild(card);
+  row.appendChild(bubble);
+  $("chat").appendChild(row);
+  $("chat").scrollTop = $("chat").scrollHeight;
 }
 $("closeBrowser")?.addEventListener("click",()=>{
   $("browserPanel")?.classList.remove("open");
