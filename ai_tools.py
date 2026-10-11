@@ -320,7 +320,7 @@ def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_
     if not keys:
         raise RuntimeError("Gemini_1, Gemini_2 and Gemini_3 are not configured in Render.")
     models = list(dict.fromkeys(
-        model for model in (GEMINI_IMAGE_MODEL, GEMINI_IMAGE_FALLBACK_MODEL, "gemini-3.1-flash-image", "gemini-2.5-flash-image")
+        model for model in (GEMINI_IMAGE_MODEL, GEMINI_IMAGE_FALLBACK_MODEL, "gemini-3.1-flash-image", "gemini-3.1-flash-lite-image")
         if model
     ))
     input_items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
