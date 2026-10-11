@@ -484,6 +484,7 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         " login", " sign in", " pricing", " price page", " docs", " documentation",
         " dashboard", " settings", " help page", " support page", " status page",
         " download page", " careers", " contact page", " about page", " train search",
+        " reels", " shorts", "music page", "video page", "profile page", "explore page", "search page",
         "pnr status", "लॉगिन", "साइन इन", "प्राइसिंग", "डैशबोर्ड", "सेटिंग",
         "डाउनलोड पेज", "सपोर्ट पेज", "लॉगिन पेज", "हेल्प पेज", "ट्रेन सर्च",
     )
@@ -498,8 +499,13 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
     # a deep URL. Open a site-scoped search for the requested page instead.
     # This also works for sites whose exact subpage URL changes frequently.
     if wants_specific_page:
-        for key, (title, url) in BROWSER_SITE_MAP.items():
-            if key in text and any(signal in text for signal in navigation_signals):
+        matching_sites = sorted(
+            ((key, value) for key, value in BROWSER_SITE_MAP.items() if key in text),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        )
+        for key, (title, url) in matching_sites:
+            if any(signal in text for signal in navigation_signals):
                 host = urllib.parse.urlsplit(url).hostname or ""
                 query = urllib.parse.quote(f"site:{host} {message}")
                 return {
