@@ -414,7 +414,7 @@ def generate_image(prompt: str) -> dict[str, Any]:
     except Exception as exc:
         return {
             "status": "error",
-            "answer": "Image generation failed. Groq prepares the prompt; Gemini creates the actual image. Both configured Gemini image models failed. Check model access and quota in Google AI Studio.",
+            "answer": "Image generation failed. Groq can prepare/refine the prompt, but it does not provide image pixels through this API; Gemini must render the image. If the technical detail shows HTTP 429, Gemini's image quota/rate limit is exhausted or unavailable for these keys/models. Check Google AI Studio quota/billing or wait for the limit to reset.",
             "error": groq_error + f"Gemini: {type(exc).__name__}: {str(exc)[:500]}",
         }
 
@@ -446,7 +446,7 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
         }
     except Exception as exc:
         return {
-            "status": "error", "answer": "Image editing failed. Gemini image models could not return an edited image. Check model access and quota in Google AI Studio.",
+            "status": "error", "answer": "Image editing failed. Groq can refine the edit prompt, but Gemini must render the edited image. If the technical detail shows HTTP 429, check Gemini image quota/rate limits in Google AI Studio or wait for the limit to reset.",
             "error": groq_error + f"Gemini: {type(exc).__name__}: {str(exc)[:500]}",
         }
 
