@@ -534,7 +534,16 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
     if not any(signal in text for signal in generic_site_signals):
         return None
 
-    # For unfamiliar sites, ask the text assistant for an official URL first.
+    # For requests for a specific page, prefer a search result over a guessed deep URL.
+    # This avoids opening a wrong URL when the provider invents a page path.
+    if wants_specific_page:
+        query = urllib.parse.quote(message + " official website page")
+        return {
+            "title": f"Search results: {message[:90]}",
+            "url": "https://www.google.com/search?q=" + query,
+        }
+
+    # For unfamiliar homepage requests, ask the text assistant for an official URL.
     # This uses the normal Groq -> Gemini text fallback only; it never calls image APIs.
     try:
         answer = ask_queen(
