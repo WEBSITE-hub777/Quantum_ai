@@ -455,6 +455,9 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         "kholo", "khol do", "open karo", "site par", "page par", "ticket book",
         "ticket booking", "टिकट बुक", "वेबसाइट खोल", "पेज खोल", "पेज दिखा",
         "खोल दो", "खोलो", "वेबसाइट पर", "पेज पर",
+        "dusra page", "doosra page", "dusre page", "agla page", "next page",
+        "page open karo", "page kholo", "website open karo", "website dikhao",
+        "दूसरा पेज", "दूसरे पेज", "अगला पेज", "अगले पेज", "अगला पन्ना",
     )
     explicit_url = re.search(r"https?://[^\s<>()]+", message, flags=re.IGNORECASE)
     if explicit_url:
@@ -485,7 +488,8 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         " dashboard", " settings", " help page", " support page", " status page",
         " download page", " careers", " contact page", " about page", " train search",
         " next page", "second page", "page 2", "page number 2", "page two",
-        " अगला पेज", "दूसरा पेज", "दूसरे पेज", "पेज 2", "दूसरा पन्ना",
+        " dusra page", " doosra page", " dusre page", " agla page", " agle page",
+        " अगला पेज", "दूसरा पेज", "दूसरे पेज", "पेज 2", "दूसरा पन्ना", "अगला पन्ना",
         " reels", " shorts", "music page", "video page", "profile page", "explore page", "search page",
         " return policy", "returns page", "refund page", "order tracking", "track order",
         " product page", "cart page", "checkout page", "wishlist", "creator studio",
