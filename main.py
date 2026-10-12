@@ -13,7 +13,7 @@ from queen import queen_status
 from router import process_request
 
 APP_NAME = "Browser Queen AI"
-APP_VERSION = "5.0.0"
+APP_VERSION = "5.0.1"
 MAX_MESSAGE_LENGTH = 20000
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
 
