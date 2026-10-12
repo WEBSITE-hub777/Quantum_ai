@@ -315,26 +315,85 @@ def _groq_image_prompt(prompt: str, image_bytes: bytes | None = None, image_mime
     raise RuntimeError("Groq image-prompt step failed: " + " | ".join(errors[-3:]))
 
 def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str]:
-    """Generate or edit an image with Gemini using multiple models and API routes."""
+    """Render or edit pixels with Gemini; rotate configured keys and supported image models."""
     keys = _gemini_keys()
     if not keys:
         raise RuntimeError("Gemini_1, Gemini_2 and Gemini_3 are not configured in Render.")
+
     models = list(dict.fromkeys(m for m in (
-        GEMINI_IMAGE_MODEL, GEMINI_IMAGE_FALLBACK_MODEL,
-        "gemini-3.1-flash-image", "gemini-3.1-flash-lite-image", "gemini-2.5-flash-image"
+        GEMINI_IMAGE_MODEL,
+        GEMINI_IMAGE_FALLBACK_MODEL,
+        "gemini-3.1-flash-image",
+        "gemini-3.1-flash-lite-image",
+        "gemini-2.5-flash-image",
     ) if m))
     encoded_input = base64.b64encode(image_bytes).decode("ascii") if image_bytes is not None else None
     errors: list[str] = []
+
+    # Try the image-oriented Interactions API first, then the generateContent
+    # route. Groq's chat API can refine a prompt, but Gemini must render pixels.
     for model in models:
+        items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        if encoded_input:
+            items.append({"type": "image", "mime_type": image_mime, "data": encoded_input})
+        interaction_body = json.dumps({
+            "model": model,
+            "input": items,
+            "response_format": {
+                "type": "image",
+                "mime_type": "image/png",
+                "aspect_ratio": "1:1",
+            },
+        }).encode("utf-8")
+
+        for index, key in enumerate(keys, 1):
+            request = urllib.request.Request(
+                "https://generativelanguage.googleapis.com/v1beta/interactions",
+                data=interaction_body,
+                headers={"Content-Type": "application/json", "x-goog-api-key": key},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    data = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
+                output_image = data.get("output_image") or {}
+                encoded = output_image.get("data")
+                if not encoded:
+                    for step in data.get("steps", []):
+                        blocks = step.get("content", []) if isinstance(step, dict) else []
+                        for block in blocks:
+                            if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+                                encoded, output_image = block["data"], block
+                                break
+                        if encoded:
+                            break
+                if not encoded:
+                    raise RuntimeError("Gemini Interactions returned no image data.")
+                base64.b64decode(encoded, validate=True)
+                mime = output_image.get("mime_type") or output_image.get("mimeType") or "image/png"
+                return f"data:{mime};base64,{encoded}", mime
+            except Exception as exc:
+                errors.append(f"{model}/interactions key {index}: {type(exc).__name__}: {str(exc)[:140]}")
+
         parts: list[dict[str, Any]] = [{"text": prompt}]
         if encoded_input:
             parts.append({"inline_data": {"mime_type": image_mime, "data": encoded_input}})
-        payload = {"contents": [{"role": "user", "parts": parts}],
-                   "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='.-')}:generateContent"
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+        }
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{urllib.parse.quote(model, safe='.-')}:generateContent"
+        )
+        body = json.dumps(payload).encode("utf-8")
         for index, key in enumerate(keys, 1):
-            request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json", "x-goog-api-key": key}, method="POST")
+            request = urllib.request.Request(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json", "x-goog-api-key": key},
+                method="POST",
+            )
             try:
                 with urllib.request.urlopen(request, timeout=180) as response:
                     data = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
@@ -346,40 +405,17 @@ def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_
                             base64.b64decode(encoded, validate=True)
                             mime = inline.get("mime_type") or inline.get("mimeType") or "image/png"
                             return f"data:{mime};base64,{encoded}", mime
-                raise RuntimeError("Gemini returned no image data.")
+                raise RuntimeError("Gemini generateContent returned no image data.")
             except Exception as exc:
                 errors.append(f"{model}/generateContent key {index}: {type(exc).__name__}: {str(exc)[:140]}")
 
-        # Try the Interactions API as a second route for the same model.
-        items: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        if encoded_input:
-            items.append({"type": "image", "mime_type": image_mime, "data": encoded_input})
-        body = json.dumps({"model": model, "input": items,
-            "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": "1:1"}}).encode("utf-8")
-        for index, key in enumerate(keys, 1):
-            request = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/interactions",
-                data=body, headers={"Content-Type": "application/json", "x-goog-api-key": key}, method="POST")
-            try:
-                with urllib.request.urlopen(request, timeout=180) as response:
-                    data = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
-                output_image = data.get("output_image") or {}
-                encoded = output_image.get("data")
-                if not encoded:
-                    for step in data.get("steps", []):
-                        for block in step.get("content", []) if isinstance(step, dict) else []:
-                            if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
-                                encoded, output_image = block["data"], block
-                                break
-                        if encoded:
-                            break
-                if not encoded:
-                    raise RuntimeError("Gemini returned no image data.")
-                base64.b64decode(encoded, validate=True)
-                mime = output_image.get("mime_type") or output_image.get("mimeType") or "image/png"
-                return f"data:{mime};base64,{encoded}", mime
-            except Exception as exc:
-                errors.append(f"{model}/interactions key {index}: {type(exc).__name__}: {str(exc)[:140]}")
-    raise RuntimeError("Gemini image routes/models failed: " + " | ".join(errors[-10:]))
+    if errors and all("429" in error or "Too Many Requests" in error for error in errors):
+        raise RuntimeError(
+            "Every configured Gemini image attempt hit HTTP 429 (quota/rate limit). "
+            "The code tried all configured keys, models, and both image API routes. "
+            "Wait for quota reset or enable image-model quota in Google AI Studio."
+        )
+    raise RuntimeError("Gemini image routes/models failed: " + " | ".join(errors[-12:]))
 
 def _gemini_image_with_groq_first(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str]:
     """Groq-first prompt preparation followed by Gemini's actual image generation/editing."""
