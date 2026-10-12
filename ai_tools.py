@@ -294,8 +294,9 @@ def _groq_image_prompt(prompt: str, image_bytes: bytes | None = None, image_mime
     model = os.getenv("GROQ_MODEL", "").strip() or "openai/gpt-oss-120b"
     errors = []
     task = (
-        "Rewrite the user's request as a concise, vivid image-generation prompt. Preserve the exact subject, "
-        "composition, style, colors, and any text requested. Do not answer the user; return only the prompt.\\n"
+        "Prepare a concise, vivid prompt for an image model. Preserve the user's subject, composition, "
+        "style, colors, and requested text. Do not claim to generate an image and do not answer the user; "
+        "return only the refined prompt.\\n"
         f"Request: {prompt}"
     )
     for index, key in enumerate(keys, 1):
