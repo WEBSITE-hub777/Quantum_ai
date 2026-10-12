@@ -484,6 +484,8 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         " login", " sign in", " pricing", " price page", " docs", " documentation",
         " dashboard", " settings", " help page", " support page", " status page",
         " download page", " careers", " contact page", " about page", " train search",
+        " next page", "second page", "page 2", "page number 2", "page two",
+        " अगला पेज", "दूसरा पेज", "दूसरे पेज", "पेज 2", "दूसरा पन्ना",
         " reels", " shorts", "music page", "video page", "profile page", "explore page", "search page",
         " return policy", "returns page", "refund page", "order tracking", "track order",
         " product page", "cart page", "checkout page", "wishlist", "creator studio",
