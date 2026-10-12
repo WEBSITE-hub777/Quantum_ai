@@ -466,6 +466,31 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         if safe_url:
             return {"title": safe_url, "url": safe_url}
 
+    # Prefer known direct subpage URLs over a generic site-search URL.
+    # Sites can still block iframe embedding; the frontend's external-open link remains the fallback.
+    direct_pages = {
+        "youtube shorts": ("YouTube Shorts", "https://www.youtube.com/shorts/"),
+        "youtube music": ("YouTube Music", "https://music.youtube.com/"),
+        "youtube subscriptions": ("YouTube subscriptions", "https://www.youtube.com/feed/subscriptions"),
+        "youtube history": ("YouTube history", "https://www.youtube.com/feed/history"),
+        "youtube trending": ("YouTube Explore", "https://www.youtube.com/feed/explore"),
+        "instagram reels": ("Instagram Reels", "https://www.instagram.com/reels/"),
+        "instagram explore": ("Instagram Explore", "https://www.instagram.com/explore/"),
+        "github repositories": ("GitHub repositories", "https://github.com/repositories"),
+        "github issues": ("GitHub issues", "https://github.com/issues"),
+        "github pull requests": ("GitHub pull requests", "https://github.com/pulls"),
+        "google images": ("Google Images", "https://images.google.com/"),
+        "google drive": ("Google Drive", "https://drive.google.com/"),
+        "gmail inbox": ("Gmail inbox", "https://mail.google.com/mail/u/0/#inbox"),
+        "amazon cart": ("Amazon India cart", "https://www.amazon.in/gp/cart/view.html"),
+        "flipkart cart": ("Flipkart cart", "https://www.flipkart.com/viewcart"),
+        "irctc pnr status": ("IRCTC PNR status", "https://www.irctc.co.in/nget/bookingStatus"),
+    }
+    if any(signal in text for signal in navigation_signals):
+        for phrase, (title, url) in sorted(direct_pages.items(), key=lambda item: len(item[0]), reverse=True):
+            if phrase in text:
+                return {"title": title, "url": url}
+
     # Also accept a bare domain with a path, e.g. "open example.com/page".
     # Require a navigation phrase so ordinary chat is not mistaken for a URL.
     if any(signal in text for signal in navigation_signals):
