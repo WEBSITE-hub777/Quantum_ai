@@ -280,8 +280,8 @@ def _prepare_generation_prompt(prompt: str) -> str:
     return text or prompt
 
 
-GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image").strip()
-GEMINI_IMAGE_FALLBACK_MODEL = os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-3.1-flash-lite-image").strip()
+GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip()
+GEMINI_IMAGE_FALLBACK_MODEL = os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-3.1-flash-image").strip()
 
 def _groq_image_prompt(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> str:
     """Use Groq to refine the image request; Groq does not return generated image pixels."""
@@ -323,9 +323,8 @@ def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_
     models = list(dict.fromkeys(m for m in (
         GEMINI_IMAGE_MODEL,
         GEMINI_IMAGE_FALLBACK_MODEL,
-        "gemini-3.1-flash-image",
-        "gemini-3.1-flash-lite-image",
         "gemini-2.5-flash-image",
+        "gemini-3.1-flash-image",
     ) if m))
     encoded_input = base64.b64encode(image_bytes).decode("ascii") if image_bytes is not None else None
     errors: list[str] = []
@@ -409,11 +408,18 @@ def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_
             except Exception as exc:
                 errors.append(f"{model}/generateContent key {index}: {type(exc).__name__}: {str(exc)[:140]}")
 
+    if errors and all("401" in error or "Unauthorized" in error for error in errors):
+        raise RuntimeError(
+            "All Gemini image attempts returned HTTP 401 Unauthorized. This means Google rejected "
+            "the configured API keys or their access; changing prompts/models cannot fix it. "
+            "In Google AI Studio create/check a valid API key, confirm the key's project has Gemini API access, "
+            "then update Render environment variables Gemini_1, Gemini_2 and Gemini_3. "
+            "Never paste API keys into chat."
+        )
     if errors and all("429" in error or "Too Many Requests" in error for error in errors):
         raise RuntimeError(
             "Every configured Gemini image attempt hit HTTP 429 (quota/rate limit). "
-            "The code tried all configured keys, models, and both image API routes. "
-            "Wait for quota reset or enable image-model quota in Google AI Studio."
+            "Wait for quota reset or enable image-generation quota for the project in Google AI Studio."
         )
     raise RuntimeError("Gemini image routes/models failed: " + " | ".join(errors[-12:]))
 
