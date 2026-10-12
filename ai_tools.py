@@ -424,28 +424,100 @@ def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_
         )
     raise RuntimeError("Gemini image routes/models failed: " + " | ".join(errors[-12:]))
 
-def _gemini_image_with_groq_first(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str]:
-    """Groq-first prompt preparation followed by Gemini's actual image generation/editing."""
-    groq_note = ""
+def _xai_keys() -> list[str]:
+    names = ("XAI_API_KEY", "XAI_API_KEYS")
+    return list(dict.fromkeys(
+        key.strip()
+        for name in names
+        for key in os.getenv(name, "").split(",")
+        if key.strip()
+    ))
+
+
+def _xai_image_request(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str]:
+    """Use xAI Grok Imagine for image generation/editing and return an inline data URL."""
+    keys = _xai_keys()
+    if not keys:
+        raise RuntimeError("XAI_API_KEY is not configured in Render. Grok Imagine image API requires an xAI API key.")
+    model = os.getenv("XAI_IMAGE_MODEL", "grok-imagine-image-2.0").strip() or "grok-imagine-image-2.0"
+    if image_bytes is None:
+        endpoint = "https://api.x.ai/v1/images/generations"
+        payload: dict[str, Any] = {"model": model, "prompt": prompt, "response_format": "url"}
+    else:
+        endpoint = "https://api.x.ai/v1/images/edits"
+        data_url = f"data:{image_mime};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "image": {"url": data_url, "type": "image_url"},
+        }
+
+    errors: list[str] = []
+    body = json.dumps(payload).encode("utf-8")
+    for index, key in enumerate(keys, 1):
+        request = urllib.request.Request(
+            endpoint,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.loads(response.read(30 * 1024 * 1024).decode("utf-8"))
+            images = result.get("data") or []
+            if not images:
+                raise RuntimeError("Grok Imagine returned no image.")
+            first = images[0]
+            encoded = first.get("b64_json") or first.get("base64")
+            if encoded:
+                raw = base64.b64decode(encoded, validate=True)
+                mime = first.get("mime_type") or "image/png"
+            else:
+                url = first.get("url") or first.get("image_url")
+                if not isinstance(url, str) or not url.startswith("https://"):
+                    raise RuntimeError("Grok Imagine response did not contain image data or a valid HTTPS URL.")
+                download_request = urllib.request.Request(url, headers={"User-Agent": "Browser-Queen-AI/1.0"})
+                with urllib.request.urlopen(download_request, timeout=60) as image_response:
+                    mime = _allowed_image_mime(image_response.headers.get_content_type())
+                    raw = image_response.read(MAX_IMAGE_BYTES + 1)
+                if not raw or len(raw) > MAX_IMAGE_BYTES:
+                    raise RuntimeError("Grok Imagine image download was empty or exceeded the image size limit.")
+            encoded = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{encoded}", mime, model
+        except Exception as exc:
+            errors.append(f"xAI key {index}: {type(exc).__name__}: {str(exc)[:200]}")
+    raise RuntimeError("Grok Imagine failed: " + " | ".join(errors[-3:]))
+
+
+def _image_with_fallback(prompt: str, image_bytes: bytes | None = None, image_mime: str = "image/jpeg") -> tuple[str, str, str, str]:
+    """Try Grok Imagine first; only if it fails, use Gemini image generation/editing."""
     try:
-        image_prompt = _groq_image_prompt(prompt, image_bytes, image_mime)
-        groq_note = "Groq prompt preparation succeeded. "
-    except Exception as exc:
-        image_prompt = prompt
-        groq_note = f"Groq prompt preparation failed ({type(exc).__name__}); using the original prompt. "
-    data_url, mime = _gemini_generate_image(image_prompt, image_bytes, image_mime)
-    return data_url, mime, f"{GEMINI_IMAGE_MODEL} (Groq-first prompt pipeline)"
+        data_url, mime, model = _xai_image_request(prompt, image_bytes, image_mime)
+        return data_url, mime, model, "Grok Imagine"
+    except Exception as xai_exc:
+        try:
+            data_url, mime = _gemini_generate_image(prompt, image_bytes, image_mime)
+            return data_url, mime, GEMINI_IMAGE_MODEL, "Google Gemini (fallback after Grok Imagine)"
+        except Exception as gemini_exc:
+            raise RuntimeError(
+                f"Grok Imagine primary failed: {type(xai_exc).__name__}: {str(xai_exc)[:350]} | "
+                f"Gemini fallback failed: {type(gemini_exc).__name__}: {str(gemini_exc)[:350]}"
+            ) from gemini_exc
+
 
 def generate_image(prompt: str) -> dict[str, Any]:
-    """Groq-first prompt preparation, then Gemini image rendering fallback."""
+    """Text-to-image: Grok Imagine first, Gemini only as fallback."""
     prompt = _prepare_generation_prompt(prompt)
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
     try:
-        data_url, mime, model = _gemini_image_with_groq_first(prompt)
+        data_url, mime, model, provider = _image_with_fallback(prompt)
         return {
             "status": "completed",
-            "provider": "Google Gemini",
+            "provider": provider,
             "model": model,
             "mime": mime,
             "data": data_url,
@@ -454,20 +526,17 @@ def generate_image(prompt: str) -> dict[str, Any]:
     except Exception as exc:
         return {
             "status": "error",
-            "answer": (
-                "Image generation failed. Groq is tried first to prepare the image prompt, "
-                "then Gemini renders the actual image. Groq's configured chat API does not "
-                "return image pixels. If the technical detail shows HTTP 429, Gemini's image "
-                "quota/rate limit is unavailable for the configured keys/models."
-            ),
-            "error": f"Gemini image fallback: {type(exc).__name__}: {str(exc)[:500]}",
+            "answer": "Image generation failed. Grok Imagine was tried first, followed by Gemini.",
+            "error": f"{type(exc).__name__}: {str(exc)[:900]}",
         }
+
 
 def _prepare_edit_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt.strip())
 
+
 def edit_image(prompt: str, image_data: str | None, image_mime: str | None = None) -> dict[str, Any]:
-    """Groq-first edit-prompt preparation, then Gemini image-to-image rendering."""
+    """Image-to-image editing: Grok Imagine first, Gemini only as fallback."""
     prompt = _prepare_edit_prompt(prompt)
     if not image_data:
         return {"status": "error", "answer": "No image was provided for editing."}
@@ -478,10 +547,10 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
     except Exception as exc:
         return {"status": "error", "answer": "Image editing failed.", "error": f"{type(exc).__name__}: {exc}"}
     try:
-        data_url, out_mime, model = _gemini_image_with_groq_first(prompt, image_bytes, mime)
+        data_url, out_mime, model, provider = _image_with_fallback(prompt, image_bytes, mime)
         return {
             "status": "completed",
-            "provider": "Google Gemini",
+            "provider": provider,
             "model": model,
             "mime": out_mime,
             "data": data_url,
@@ -490,11 +559,6 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
     except Exception as exc:
         return {
             "status": "error",
-            "answer": (
-                "Image editing failed. Groq is tried first to prepare the edit prompt, "
-                "then Gemini edits/renders the image. Groq's configured chat API does not "
-                "return edited image pixels. If the technical detail shows HTTP 429, "
-                "Gemini's image quota/rate limit is unavailable for the configured keys/models."
-            ),
-            "error": f"Gemini image fallback: {type(exc).__name__}: {str(exc)[:500]}",
+            "answer": "Image editing failed. Grok Imagine was tried first, followed by Gemini.",
+            "error": f"{type(exc).__name__}: {str(exc)[:900]}",
         }
