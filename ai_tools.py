@@ -437,35 +437,37 @@ def _gemini_image_with_groq_first(prompt: str, image_bytes: bytes | None = None,
     return data_url, mime, f"{GEMINI_IMAGE_MODEL} (Groq-first prompt pipeline)"
 
 def generate_image(prompt: str) -> dict[str, Any]:
-    """Generate an image: Groq prepares the prompt; Gemini returns the actual image."""
+    """Groq-first prompt preparation, then Gemini image rendering fallback."""
     prompt = _prepare_generation_prompt(prompt)
     if not prompt or len(prompt) > MAX_IMAGE_PROMPT_LENGTH:
         return {"status": "error", "answer": "Invalid or overly long prompt."}
-    groq_error = ""
     try:
-        try:
-            image_prompt = _groq_image_prompt(prompt)
-        except Exception as exc:
-            image_prompt = prompt
-            groq_error = f"Groq prompt step: {type(exc).__name__}: {str(exc)[:180]}. "
-        data_url, mime = _gemini_generate_image(image_prompt)
+        data_url, mime, model = _gemini_image_with_groq_first(prompt)
         return {
-            "status": "completed", "provider": "Google Gemini", "model": GEMINI_IMAGE_MODEL,
-            "mime": mime, "data": data_url,
-            "answer": "Image generated successfully with Gemini.",
+            "status": "completed",
+            "provider": "Google Gemini",
+            "model": model,
+            "mime": mime,
+            "data": data_url,
+            "answer": "Image generated successfully.",
         }
     except Exception as exc:
         return {
             "status": "error",
-            "answer": "Image generation failed. Groq can prepare/refine the prompt, but it does not provide image pixels through this API; Gemini must render the image. If the technical detail shows HTTP 429, Gemini's image quota/rate limit is exhausted or unavailable for these keys/models. Check Google AI Studio quota/billing or wait for the limit to reset.",
-            "error": groq_error + f"Gemini: {type(exc).__name__}: {str(exc)[:500]}",
+            "answer": (
+                "Image generation failed. Groq is tried first to prepare the image prompt, "
+                "then Gemini renders the actual image. Groq's configured chat API does not "
+                "return image pixels. If the technical detail shows HTTP 429, Gemini's image "
+                "quota/rate limit is unavailable for the configured keys/models."
+            ),
+            "error": f"Gemini image fallback: {type(exc).__name__}: {str(exc)[:500]}",
         }
 
 def _prepare_edit_prompt(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt.strip())
 
 def edit_image(prompt: str, image_data: str | None, image_mime: str | None = None) -> dict[str, Any]:
-    """Edit an uploaded image using Gemini; Groq prepares the edit prompt first."""
+    """Groq-first edit-prompt preparation, then Gemini image-to-image rendering."""
     prompt = _prepare_edit_prompt(prompt)
     if not image_data:
         return {"status": "error", "answer": "No image was provided for editing."}
@@ -475,21 +477,24 @@ def edit_image(prompt: str, image_data: str | None, image_mime: str | None = Non
         image_bytes, mime = _image_data_to_bytes(image_data, image_mime)
     except Exception as exc:
         return {"status": "error", "answer": "Image editing failed.", "error": f"{type(exc).__name__}: {exc}"}
-    groq_error = ""
     try:
-        try:
-            image_prompt = _groq_image_prompt(prompt, image_bytes, mime)
-        except Exception as exc:
-            image_prompt = prompt
-            groq_error = f"Groq prompt step: {type(exc).__name__}: {str(exc)[:180]}. "
-        data_url, out_mime = _gemini_generate_image(image_prompt, image_bytes, mime)
+        data_url, out_mime, model = _gemini_image_with_groq_first(prompt, image_bytes, mime)
         return {
-            "status": "completed", "provider": "Google Gemini", "model": GEMINI_IMAGE_MODEL,
-            "mime": out_mime, "data": data_url, "answer": "",
+            "status": "completed",
+            "provider": "Google Gemini",
+            "model": model,
+            "mime": out_mime,
+            "data": data_url,
+            "answer": "",
         }
     except Exception as exc:
         return {
-            "status": "error", "answer": "Image editing failed. Groq can refine the edit prompt, but Gemini must render the edited image. If the technical detail shows HTTP 429, check Gemini image quota/rate limits in Google AI Studio or wait for the limit to reset.",
-            "error": groq_error + f"Gemini: {type(exc).__name__}: {str(exc)[:500]}",
+            "status": "error",
+            "answer": (
+                "Image editing failed. Groq is tried first to prepare the edit prompt, "
+                "then Gemini edits/renders the image. Groq's configured chat API does not "
+                "return edited image pixels. If the technical detail shows HTTP 429, "
+                "Gemini's image quota/rate limit is unavailable for the configured keys/models."
+            ),
+            "error": f"Gemini image fallback: {type(exc).__name__}: {str(exc)[:500]}",
         }
-
