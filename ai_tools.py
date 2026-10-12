@@ -425,7 +425,9 @@ def _gemini_generate_image(prompt: str, image_bytes: bytes | None = None, image_
     raise RuntimeError("Gemini image routes/models failed: " + " | ".join(errors[-12:]))
 
 def _xai_keys() -> list[str]:
-    names = ("XAI_API_KEY", "XAI_API_KEYS")
+    # xAI Grok Imagine keys are distinct from GroqCloud chat/vision keys.
+    # Support both conventional xAI names and explicit GROK aliases.
+    names = ("XAI_API_KEY", "XAI_API_KEYS", "GROK_API_KEY", "GROK_API_KEYS")
     return list(dict.fromkeys(
         key.strip()
         for name in names
