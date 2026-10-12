@@ -485,8 +485,13 @@ def resolve_browser_target(message: str) -> dict[str, str] | None:
         " dashboard", " settings", " help page", " support page", " status page",
         " download page", " careers", " contact page", " about page", " train search",
         " reels", " shorts", "music page", "video page", "profile page", "explore page", "search page",
+        " return policy", "returns page", "refund page", "order tracking", "track order",
+        " product page", "cart page", "checkout page", "wishlist", "creator studio",
+        "channel page", "watch page", "subscriptions page", "privacy page", "terms page",
         "pnr status", "लॉगिन", "साइन इन", "प्राइसिंग", "डैशबोर्ड", "सेटिंग",
         "डाउनलोड पेज", "सपोर्ट पेज", "लॉगिन पेज", "हेल्प पेज", "ट्रेन सर्च",
+        "रिटर्न पॉलिसी", "रिटर्न पेज", "रिफंड पेज", "ऑर्डर ट्रैक", "प्रोडक्ट पेज",
+        "कार्ट पेज", "प्रोफाइल पेज", "वीडियो पेज", "सर्च पेज",
     )
     wants_specific_page = any(signal in text for signal in detailed_page_signals)
     if wants_specific_page and any(term in text for term in ("irctc", "indian railways", "railway ticket", "train search", "ट्रेन सर्च")):
